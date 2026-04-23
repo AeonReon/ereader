@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16306a"/>
+      <stop offset="0.55" stop-color="#0b1b3a"/>
+      <stop offset="1" stop-color="#060e22"/>
+    </linearGradient>
+    <linearGradient id="page" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6efe0"/>
+      <stop offset="1" stop-color="#e8dbbd"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e6c26a"/>
+      <stop offset="1" stop-color="#a8802f"/>
+    </linearGradient>
+    <linearGradient id="ribbon" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e4b95b"/>
+      <stop offset="1" stop-color="#8a5a18"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.2" r="0.9">
+      <stop offset="0" stop-color="#2a4a92" stop-opacity="0.7"/>
+      <stop offset="1" stop-color="#0b1b3a" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6"/>
+      <feOffset dx="0" dy="8"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.5"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Rounded square background (iOS style will mask to rounded) -->
+  <rect x="0" y="0" width="512" height="512" rx="110" ry="110" fill="url(#bg)"/>
+  <rect x="0" y="0" width="512" height="512" rx="110" ry="110" fill="url(#glow)"/>
+
+  <!-- Open book: two pages meeting at center spine -->
+  <g filter="url(#shadow)">
+    <!-- Left page -->
+    <path d="M 96 150
+             C 140 130, 220 130, 256 158
+             L 256 402
+             C 220 374, 140 374, 96 394
+             Z" fill="url(#page)"/>
+    <!-- Right page -->
+    <path d="M 416 150
+             C 372 130, 292 130, 256 158
+             L 256 402
+             C 292 374, 372 374, 416 394
+             Z" fill="url(#page)"/>
+    <!-- Spine shadow -->
+    <path d="M 252 158 L 260 158 L 260 402 L 252 402 Z" fill="rgba(0,0,0,0.12)"/>
+
+    <!-- Text lines on pages (gold) -->
+    <g fill="#b8923f" opacity="0.7">
+      <rect x="118" y="192" width="110" height="8" rx="4"/>
+      <rect x="118" y="212" width="120" height="8" rx="4"/>
+      <rect x="118" y="232" width="100" height="8" rx="4"/>
+      <rect x="118" y="260" width="120" height="8" rx="4"/>
+      <rect x="118" y="280" width="90" height="8" rx="4"/>
+      <rect x="118" y="308" width="110" height="8" rx="4"/>
+      <rect x="118" y="328" width="80" height="8" rx="4"/>
+
+      <rect x="284" y="192" width="120" height="8" rx="4"/>
+      <rect x="284" y="212" width="100" height="8" rx="4"/>
+      <rect x="284" y="232" width="115" height="8" rx="4"/>
+      <rect x="284" y="260" width="90" height="8" rx="4"/>
+      <rect x="284" y="280" width="120" height="8" rx="4"/>
+      <rect x="284" y="308" width="85" height="8" rx="4"/>
+      <rect x="284" y="328" width="110" height="8" rx="4"/>
+    </g>
+  </g>
+
+  <!-- Gold bookmark ribbon -->
+  <g>
+    <path d="M 334 120 L 378 120 L 378 256 L 356 236 L 334 256 Z" fill="url(#ribbon)"/>
+    <path d="M 334 120 L 378 120 L 378 130 L 334 130 Z" fill="rgba(255,255,255,0.25)"/>
+  </g>
+
+  <!-- Small gold star accent -->
+  <g transform="translate(418 118)" fill="url(#gold)" opacity="0.9">
+    <path d="M 0 -14 L 4 -4 L 15 -4 L 6 3 L 9 14 L 0 7 L -9 14 L -6 3 L -15 -4 L -4 -4 Z"/>
+  </g>
+</svg>

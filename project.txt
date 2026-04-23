@@ -1,0 +1,47 @@
+Project: Reader (e-reader PWA)
+Location: APPS/ereader/
+GitHub: AeonReon/ereader
+Vercel: aeonreon/ereader
+
+Summary
+-------
+Private, on-device e-reader that works on iPhone, iPad, Mac (Safari/Chrome),
+and Android. Installable as a PWA. Reads EPUB, PDF, and TXT. Remembers
+reading position per book. Read-aloud via the browser's built-in speech engine.
+All books stay on the device (IndexedDB) — nothing is uploaded.
+
+Features
+--------
+- Library with covers extracted from the file (EPUB cover / first PDF page)
+- Drag-and-drop or file picker upload
+- Formats: EPUB, PDF, plain text
+  (MOBI/AZW shows a friendly "convert to EPUB first" message)
+- Reader settings: theme (light/sepia/dark), font size, line spacing, font family
+- Table of contents (EPUB + PDF outline)
+- Bookmarks with timestamps and progress
+- Progress bar + jump-to-progress slider
+- Read-aloud (audiobook mode) with voice + speed controls, auto-advances pages
+- Offline-first service worker — works with no internet
+- Installable on iPhone/iPad via Safari "Add to Home Screen"
+- Installable on Mac / Android via the browser's install button
+
+Libraries used (via CDN)
+------------------------
+- epub.js           EPUB rendering
+- pdf.js            PDF rendering (Mozilla)
+- JSZip             Reading EPUB metadata (title/author/cover)
+
+No build step, no backend, no API keys. Static site.
+
+Colour palette
+--------------
+- Navy gradient background   #0b1b3a / #16306a / #060e22
+- Gold accent                #d4a952 / #b8923f
+- Cream page                 #f6efe0 / #e8dbbd
+
+Design notes
+------------
+- Blue + gold palette chosen per user preference for personal projects
+- Book-icon with open pages, gold ribbon, and small gold star accent
+- Safe-area insets respected for iPhone notch / home indicator
+- Touch gestures: tap left/right third to turn pages; swipe to turn
