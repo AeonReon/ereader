@@ -64,6 +64,13 @@ const DB = (() => {
       const s = await tx('state', 'readwrite');
       return reqP(s.put(state));
     },
+    async listStates() {
+      const s = await tx('state');
+      const all = await reqP(s.getAll());
+      const map = new Map();
+      for (const st of all) map.set(st.id, st);
+      return map;
+    },
     async getPref(key, fallback) {
       const s = await tx('prefs');
       const v = await reqP(s.get(key));

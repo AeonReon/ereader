@@ -93,12 +93,19 @@
     const books = await DB.listBooks();
     bookGrid.innerHTML = '';
     if (!books.length) {
-      bookGrid.innerHTML = '<div class="empty">No books yet — add an EPUB, PDF, or TXT to get started.</div>';
+      bookGrid.innerHTML = `
+        <div class="empty">
+          <svg width="84" height="84" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M18 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm0 18H6V4h2v8l2.5-1.5L13 12V4h5v16z" />
+          </svg>
+          <p>Your library is empty.</p>
+          <p class="hint">Add an EPUB, PDF, or text file to get started — your books stay on your device.</p>
+        </div>`;
       return;
     }
-    // Pull state (progress + lastOpened lives there) for each book so we can
-    // sort "recently opened" first.
-    const withState = await Promise.all(books.map(async (book) => ({ book, st: await DB.getState(book.id) })));
+    // One IDB read for all book states (progress + lastOpened live in the state store).
+    const states = await DB.listStates();
+    const withState = books.map((book) => ({ book, st: states.get(book.id) || { id: book.id, progress: 0, lastOpened: 0, bookmarks: [] } }));
     withState.sort((a, b) => (b.st.lastOpened || 0) - (a.st.lastOpened || 0));
     for (const { book, st } of withState) {
       const card = document.createElement('div');
@@ -336,6 +343,7 @@
     if (!app.currentBookId) return;
     clearTimeout(app.savingTimer);
     app.savingTimer = setTimeout(async () => {
+      app.savingTimer = null;
       const st = await DB.getState(app.currentBookId);
       Object.assign(st, patch);
       await DB.setState(st);
@@ -600,15 +608,22 @@
   });
 
   function watchTtsForAdvance() {
-    const tick = setInterval(async () => {
-      if (!app.ttsActive) { clearInterval(tick); return; }
+    // Clear any prior watcher so we never stack intervals (which would make
+    // Reader.next() fire multiple times per page boundary and skip pages).
+    if (app.ttsWatchTimer) clearInterval(app.ttsWatchTimer);
+    app.ttsWatchTimer = setInterval(async () => {
+      if (!app.ttsActive) {
+        clearInterval(app.ttsWatchTimer);
+        app.ttsWatchTimer = null;
+        return;
+      }
       if (!TTS.isPlaying()) {
-        clearInterval(tick);
-        if (!app.ttsActive) return;
-        // Advance and read next
+        clearInterval(app.ttsWatchTimer);
+        app.ttsWatchTimer = null;
         const beforePos = JSON.stringify(Reader.currentPosition());
         Reader.next();
         setTimeout(async () => {
+          if (!app.ttsActive) return;
           const afterPos = JSON.stringify(Reader.currentPosition());
           if (beforePos === afterPos) {
             setTtsUI(false);
@@ -630,6 +645,10 @@
   function setTtsUI(on) {
     app.ttsActive = on;
     readerView.classList.toggle('tts-active', on);
+    if (!on && app.ttsWatchTimer) {
+      clearInterval(app.ttsWatchTimer);
+      app.ttsWatchTimer = null;
+    }
   }
 
   // Toggle chrome on tap middle (emitted by EPUB engine) — kept simple: always visible

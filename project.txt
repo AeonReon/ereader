@@ -1,7 +1,8 @@
 Project: Reader (e-reader PWA)
 Location: APPS/ereader/
-GitHub: AeonReon/ereader
+GitHub: https://github.com/AeonReon/ereader
 Vercel: aeonreon/ereader
+Live: https://ereader-flax.vercel.app
 
 Summary
 -------
