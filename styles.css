@@ -446,8 +446,56 @@ input, select { font: inherit; color: inherit; }
 #reader.theme-dark #pdf-area { background: #0f1a2c; }
 #reader.theme-dark #txt-body { color: #e8ecf4; }
 
-/* TTS active */
-.tts-active #tts-btn { background: rgba(200,160,78,0.22); color: var(--gold); }
+/* TTS active — swap play icon for stop square so the button's role is obvious */
+.tts-active #tts-btn,
+#tts-btn.is-playing { background: rgba(200,160,78,0.22); color: var(--gold); }
+#tts-btn .tts-icon-stop { display: none; }
+#tts-btn.is-playing .tts-icon-play { display: none; }
+#tts-btn.is-playing .tts-icon-stop { display: inline; }
+
+/* Echo voice toggle row in settings */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.toggle-row > span:first-child { flex: 1; }
+.toggle-row .hint.inline {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
+.toggle-row input[type="checkbox"] {
+  width: 44px; height: 26px;
+  -webkit-appearance: none; appearance: none;
+  background: rgba(0,0,0,0.18);
+  border-radius: 999px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.18s ease;
+  flex-shrink: 0;
+}
+.toggle-row input[type="checkbox"]::after {
+  content: '';
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 20px; height: 20px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  transition: transform 0.18s ease;
+}
+.toggle-row input[type="checkbox"]:checked { background: var(--gold, #c8a04e); }
+.toggle-row input[type="checkbox"]:checked::after { transform: translateX(18px); }
+.device-voice-label {
+  display: block;
+  margin-top: 12px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  font-weight: 500 !important;
+}
 
 /* ── Drawers ── */
 .drawer {

@@ -27,6 +27,7 @@
   const tocList = el('toc-list');
   const bookmarksList = el('bookmarks-list');
   const voiceSelect = el('voice-select');
+  const useEchoToggle = el('use-echo');
   const rateEl = el('rate');
   const rateLabel = el('rate-label');
   const storageInfo = el('storage-info');
@@ -44,6 +45,7 @@
       spacing: 1.6,
       rate: 1.0,
       voiceURI: null,
+      useEcho: true,
     },
   };
 
@@ -66,6 +68,7 @@
     Reader.setSpacing(app.prefs.spacing);
     TTS.setRate(app.prefs.rate);
     if (app.prefs.voiceURI) TTS.setVoice(app.prefs.voiceURI);
+    TTS.setUseEcho(app.prefs.useEcho !== false);
     // Sync UI
     syncPrefsUI();
   }
@@ -542,6 +545,16 @@
     TTS.setVoice(voiceSelect.value);
     savePrefs();
   });
+  if (useEchoToggle) {
+    useEchoToggle.checked = app.prefs.useEcho !== false;
+    useEchoToggle.addEventListener('change', () => {
+      app.prefs.useEcho = useEchoToggle.checked;
+      TTS.setUseEcho(app.prefs.useEcho);
+      // If currently playing, stop so the next play uses the new engine.
+      if (TTS.isPlaying()) { TTS.stop(); setTtsUI(false); }
+      savePrefs();
+    });
+  }
   if (window.speechSynthesis) {
     speechSynthesis.addEventListener('voiceschanged', () => {
       if (settingsDrawer.classList.contains('open')) populateVoices();
@@ -645,6 +658,10 @@
   function setTtsUI(on) {
     app.ttsActive = on;
     readerView.classList.toggle('tts-active', on);
+    if (ttsBtn) {
+      ttsBtn.classList.toggle('is-playing', on);
+      ttsBtn.setAttribute('aria-label', on ? 'Stop reading' : 'Read aloud');
+    }
     if (!on && app.ttsWatchTimer) {
       clearInterval(app.ttsWatchTimer);
       app.ttsWatchTimer = null;
