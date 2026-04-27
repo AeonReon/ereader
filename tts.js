@@ -1,7 +1,7 @@
 // Read-aloud engine.
 //
 // Two engines, one API:
-//   - "echo"  → Kokoro neural TTS via the Mac mini (https://tts.websitesupport.site).
+//   - "echo"  → Kokoro neural TTS via the Mac mini (https://tts.aiprofits.cc).
 //               Same Echo voice used in PDF Studio and the AI chat. Sounds great.
 //   - "web"   → the browser's built-in SpeechSynthesis (works offline, sounds robotic on iOS).
 //
@@ -11,7 +11,7 @@
 // Stopping is robust: aborts in-flight fetches, pauses the persistent <audio>
 // element, cancels any queued speech utterances, clears state.
 const TTS = (() => {
-  const ECHO_ENDPOINT = 'https://tts.websitesupport.site/api/tts';
+  const ECHO_ENDPOINT = 'https://tts.aiprofits.cc/api/tts';
   const ECHO_VOICE = 'am_echo';
   const CHUNK_MAX = 280;
 
