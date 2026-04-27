@@ -300,17 +300,33 @@ input, select { font: inherit; color: inherit; }
   width: 0%;
   transition: width .4s ease;
 }
-.book-card .delete {
+.book-card .card-actions {
   position: absolute; top: 8px; right: 8px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.book-card .card-action {
   width: 28px; height: 28px; border-radius: 50%;
   background: rgba(15,33,80,0.85); color: #fff;
-  opacity: 0; transition: opacity .15s, transform .15s;
+  opacity: 0.55; transition: opacity .15s, transform .15s, background .15s;
   display: flex; align-items: center; justify-content: center;
   backdrop-filter: blur(4px);
-  transform: scale(0.9);
+  transform: scale(0.92);
+  border: none; padding: 0; cursor: pointer;
 }
-.book-card:hover .delete,
-.book-card:focus-within .delete { opacity: 1; transform: scale(1); }
+.book-card .card-action:hover { background: rgba(15,33,80,0.95); }
+.book-card .card-action.clean { background: rgba(212, 169, 82, 0.92); color: #1c2e58; }
+.book-card .card-action.clean:hover { background: rgba(220, 178, 90, 1); }
+/* Touch devices have no hover — make the buttons fully visible at rest so
+   users on the BOOX / phone don't have to discover them. */
+@media (hover: hover) {
+  .book-card .card-action { opacity: 0; }
+  .book-card:hover .card-action,
+  .book-card:focus-within .card-action { opacity: 0.85; transform: scale(1); }
+  .book-card:hover .card-action.clean { opacity: 1; }
+}
+@media (hover: none) {
+  .book-card .card-action { opacity: 0.92; transform: scale(1); }
+}
 
 .empty {
   grid-column: 1 / -1;

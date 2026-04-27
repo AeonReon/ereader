@@ -124,6 +124,11 @@
       const title = escapeHTML(book.title);
       const author = escapeHTML(book.author || '');
       const pct = Math.round((st.progress || 0) * 100);
+      const showCleanAction = book.format === 'pdf' && !/·\s*Cleaned/i.test(book.title || '');
+      const cleanBtnHTML = showCleanAction ? `
+        <button class="card-action clean" aria-label="Clean with PDF Studio" title="Clean with PDF Studio">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M21 6h-3.17l-1.84-2H8.01L6.17 6H3v2h18V6zM4 19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9H4v10zm5-7l3 3l3-3l1.41 1.41L13.83 15l1.58 1.59L14 18l-1.5-1.5L11 18l-1.41-1.41L11.17 15L9.59 13.41z"/></svg>
+        </button>` : '';
       card.innerHTML = `
         <div class="book-cover">${book.cover
           ? `<img alt="" src="${book.cover}">`
@@ -133,12 +138,15 @@
           <p class="book-author">${author || formatKind(book.format)}</p>
           <div class="book-progress" title="${pct}% read"><span style="width:${pct}%"></span></div>
         </div>
-        <button class="delete" aria-label="Remove">
-          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 6.41L17.59 5L12 10.59L6.41 5L5 6.41L10.59 12L5 17.59L6.41 19L12 13.41L17.59 19L19 17.59L13.41 12z"/></svg>
-        </button>
+        <div class="card-actions">
+          ${cleanBtnHTML}
+          <button class="card-action delete" aria-label="Remove">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 6.41L17.59 5L12 10.59L6.41 5L5 6.41L10.59 12L5 17.59L6.41 19L12 13.41L17.59 19L19 17.59L13.41 12z"/></svg>
+          </button>
+        </div>
       `;
       card.addEventListener('click', (e) => {
-        if (e.target.closest('.delete')) return;
+        if (e.target.closest('.card-action')) return;
         openBook(book.id);
       });
       card.querySelector('.delete').addEventListener('click', async (e) => {
@@ -147,6 +155,18 @@
         await DB.deleteBook(book.id);
         renderLibrary();
       });
+      const cleanBtn = card.querySelector('.clean');
+      if (cleanBtn) {
+        cleanBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          // Need full book record (with data ArrayBuffer) for upload
+          const full = await DB.getBook(book.id);
+          if (!full) { showToast('Book not found.'); return; }
+          // Open the reader so the progress banner is visible during cleaning
+          await openBook(book.id);
+          runCleanFlow(full);
+        });
+      }
       bookGrid.appendChild(card);
     }
   }
