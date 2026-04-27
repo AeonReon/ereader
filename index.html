@@ -79,20 +79,6 @@
     </div>
   </header>
 
-  <!-- Scan-detected banner (PDF only) — offers to send the book to PDF Studio -->
-  <div id="clean-banner" class="clean-banner hidden">
-    <div class="clean-banner-text">
-      <span class="clean-banner-title">📖 Looks like a scanned PDF</span>
-      <span class="clean-banner-sub" id="clean-banner-sub">Pages turn faster, search works, and Echo can read it aloud after cleaning.</span>
-    </div>
-    <div class="clean-banner-actions">
-      <button id="clean-now-btn" class="btn-primary">Clean now</button>
-      <button id="clean-dismiss-btn" class="btn-icon" aria-label="Dismiss">
-        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5L12 10.59L6.41 5L5 6.41L10.59 12L5 17.59L6.41 19L12 13.41L17.59 19L19 17.59L13.41 12z"/></svg>
-      </button>
-    </div>
-  </div>
-
   <div id="reader-content" class="reader-content">
     <div id="epub-area" class="reader-area"></div>
     <div id="pdf-area" class="reader-area"><canvas id="pdf-canvas"></canvas></div>
@@ -171,11 +157,6 @@
       <button data-ff="mono">Mono</button>
     </div>
   </div>
-  <div class="settings-group" id="clean-pdf-group" style="display:none">
-    <label>This PDF</label>
-    <button id="clean-pdf-btn" class="btn-primary block">Clean with PDF Studio</button>
-    <div class="hint">Sends this PDF to your Mac mini for OCR + reflow into a clean readable copy. Long scanned books take 5–15 min. The original stays in your library.</div>
-  </div>
 </div>
 
 <!-- Global settings drawer -->
@@ -198,11 +179,6 @@
     <label>Reading speed</label>
     <input id="rate" type="range" min="0.6" max="2.0" step="0.1" value="1.0">
     <div id="rate-label" class="hint">1.0×</div>
-  </div>
-  <div class="settings-group">
-    <label>PDF Studio password <span class="hint inline">— for cleaning scanned PDFs</span></label>
-    <input id="pdf-studio-password" type="password" placeholder="Enter password to enable" autocomplete="off" />
-    <div id="pdf-studio-status" class="hint">Enter your PDF Studio password once to enable one-tap scan cleaning.</div>
   </div>
   <div class="settings-group">
     <label>Storage</label>

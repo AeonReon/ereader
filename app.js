@@ -29,14 +29,6 @@
   const voiceSelect = el('voice-select');
   const useEchoToggle = el('use-echo');
   const rateEl = el('rate');
-  const cleanBanner = el('clean-banner');
-  const cleanBannerSub = el('clean-banner-sub');
-  const cleanNowBtn = el('clean-now-btn');
-  const cleanDismissBtn = el('clean-dismiss-btn');
-  const cleanPdfGroup = el('clean-pdf-group');
-  const cleanPdfBtn = el('clean-pdf-btn');
-  const pdfStudioPasswordInput = el('pdf-studio-password');
-  const pdfStudioStatus = el('pdf-studio-status');
   const rateLabel = el('rate-label');
   const storageInfo = el('storage-info');
   const fontSizeLabel = el('font-size-label');
@@ -124,11 +116,6 @@
       const title = escapeHTML(book.title);
       const author = escapeHTML(book.author || '');
       const pct = Math.round((st.progress || 0) * 100);
-      const showCleanAction = book.format === 'pdf' && !/·\s*Cleaned/i.test(book.title || '');
-      const cleanBtnHTML = showCleanAction ? `
-        <button class="card-action clean" aria-label="Clean with PDF Studio" title="Clean with PDF Studio">
-          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M21 6h-3.17l-1.84-2H8.01L6.17 6H3v2h18V6zM4 19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9H4v10zm5-7l3 3l3-3l1.41 1.41L13.83 15l1.58 1.59L14 18l-1.5-1.5L11 18l-1.41-1.41L11.17 15L9.59 13.41z"/></svg>
-        </button>` : '';
       card.innerHTML = `
         <div class="book-cover">${book.cover
           ? `<img alt="" src="${book.cover}">`
@@ -138,15 +125,12 @@
           <p class="book-author">${author || formatKind(book.format)}</p>
           <div class="book-progress" title="${pct}% read"><span style="width:${pct}%"></span></div>
         </div>
-        <div class="card-actions">
-          ${cleanBtnHTML}
-          <button class="card-action delete" aria-label="Remove">
-            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 6.41L17.59 5L12 10.59L6.41 5L5 6.41L10.59 12L5 17.59L6.41 19L12 13.41L17.59 19L19 17.59L13.41 12z"/></svg>
-          </button>
-        </div>
+        <button class="delete" aria-label="Remove">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 6.41L17.59 5L12 10.59L6.41 5L5 6.41L10.59 12L5 17.59L6.41 19L12 13.41L17.59 19L19 17.59L13.41 12z"/></svg>
+        </button>
       `;
       card.addEventListener('click', (e) => {
-        if (e.target.closest('.card-action')) return;
+        if (e.target.closest('.delete')) return;
         openBook(book.id);
       });
       card.querySelector('.delete').addEventListener('click', async (e) => {
@@ -155,18 +139,6 @@
         await DB.deleteBook(book.id);
         renderLibrary();
       });
-      const cleanBtn = card.querySelector('.clean');
-      if (cleanBtn) {
-        cleanBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          // Need full book record (with data ArrayBuffer) for upload
-          const full = await DB.getBook(book.id);
-          if (!full) { showToast('Book not found.'); return; }
-          // Open the reader so the progress banner is visible during cleaning
-          await openBook(book.id);
-          runCleanFlow(full);
-        });
-      }
       bookGrid.appendChild(card);
     }
   }
@@ -363,25 +335,6 @@
       st.lastOpened = Date.now();
       await DB.setState(st);
       app.currentState = st;
-      // Show the manual "Clean with PDF Studio" button for ANY PDF that isn't
-      // already a cleaned version. Lives in the Reader Settings drawer.
-      const isPdf = book.format === 'pdf' && !/·\s*Cleaned/i.test(book.title || '');
-      if (cleanPdfGroup) cleanPdfGroup.style.display = isPdf ? '' : 'none';
-      if (cleanPdfBtn) cleanPdfBtn.onclick = () => {
-        closeAllDrawers();
-        runCleanFlow(book);
-      };
-
-      // Auto banner — only when scan detected, not already cleaned, not previously dismissed.
-      hideCleanBanner();
-      if (isPdf && Reader.state.pdf.doc) {
-        const dismissed = JSON.parse(localStorage.getItem(PDF_STUDIO_DISMISS_KEY) || '[]');
-        if (!dismissed.includes(book.id)) {
-          isProbablyScan(Reader.state.pdf.doc).then((scan) => {
-            if (scan && app.currentBookId === id) showCleanBanner(book, Reader.state.pdf.doc);
-          }).catch(() => {});
-        }
-      }
     } catch (e) {
       console.error(e);
       showToast('Couldn\'t open this book — the file may be corrupt.');
@@ -422,7 +375,6 @@
     libraryView.classList.add('active');
     closeAllDrawers();
     setTtsUI(false);
-    if (typeof hideCleanBanner === 'function') hideCleanBanner();
     renderLibrary();
   }
 
@@ -767,294 +719,6 @@
   // Toggle chrome on tap middle (emitted by EPUB engine) — kept simple: always visible
   window.addEventListener('reader:toggle-chrome', () => {});
 
-  // -------------------- PDF Studio cleaning --------------------
-  // Cross-origin auth: the Reader stores the PDF Studio password as the same
-  // SHA-256 token PDF Studio's cookie holds, then sends it as a header on
-  // every clean request (SameSite=Lax cookies aren't sent across origins).
-  const PDF_STUDIO_BASE = 'https://pdf.aiprofits.cc';
-  const PDF_STUDIO_TOKEN_KEY = 'pdf_studio_auth_token';
-  const PDF_STUDIO_DISMISS_KEY = 'pdf_studio_dismissed';
-
-  async function sha256Hex(text) {
-    const buf = new TextEncoder().encode(text);
-    const hash = await crypto.subtle.digest('SHA-256', buf);
-    return Array.from(new Uint8Array(hash))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-  }
-
-  async function pdfStudioToken() {
-    return localStorage.getItem(PDF_STUDIO_TOKEN_KEY) || '';
-  }
-
-  async function setPdfStudioPassword(password) {
-    if (!password) {
-      localStorage.removeItem(PDF_STUDIO_TOKEN_KEY);
-      return false;
-    }
-    const token = await sha256Hex('pdf-studio:' + password);
-    // Verify against the server before saving — a wrong password is useless.
-    try {
-      const r = await fetch(PDF_STUDIO_BASE + '/jobs', {
-        headers: { 'X-PDF-Studio-Auth': token },
-      });
-      if (!r.ok) return false;
-      localStorage.setItem(PDF_STUDIO_TOKEN_KEY, token);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  // Sample 3 pages of a PDF and decide if it's a scan based on extracted text.
-  async function isProbablyScan(pdfDoc) {
-    if (!pdfDoc || pdfDoc.numPages < 1) return false;
-    const sample = [
-      Math.min(pdfDoc.numPages, 3),
-      Math.min(pdfDoc.numPages, Math.floor(pdfDoc.numPages / 2) + 1),
-      pdfDoc.numPages,
-    ];
-    let totalChars = 0, samples = 0;
-    for (const n of new Set(sample)) {
-      try {
-        const page = await pdfDoc.getPage(n);
-        const tc = await page.getTextContent();
-        const text = tc.items.map(i => i.str || '').join('');
-        totalChars += text.replace(/\s/g, '').length;
-        samples++;
-      } catch (_) {}
-    }
-    if (!samples) return false;
-    return (totalChars / samples) < 80;  // <80 non-space chars per page = scan
-  }
-
-  function showCleanBanner(book, pdfDoc) {
-    cleanBanner.classList.remove('hidden', 'is-progress', 'is-success', 'is-error');
-    cleanBannerSub.textContent =
-      'Pages turn faster, search works, and Echo can read it aloud after cleaning.';
-    cleanNowBtn.disabled = false;
-    cleanNowBtn.textContent = 'Clean now';
-    cleanNowBtn.style.display = '';
-    cleanDismissBtn.style.display = '';
-    cleanNowBtn.onclick = () => runCleanFlow(book);
-    cleanDismissBtn.onclick = () => {
-      const dismissed = JSON.parse(localStorage.getItem(PDF_STUDIO_DISMISS_KEY) || '[]');
-      if (!dismissed.includes(book.id)) dismissed.push(book.id);
-      localStorage.setItem(PDF_STUDIO_DISMISS_KEY, JSON.stringify(dismissed));
-      hideCleanBanner();
-    };
-  }
-  function hideCleanBanner() { cleanBanner.classList.add('hidden'); }
-
-  function setBannerProgress(title, sub, indeterminate, percent) {
-    cleanBanner.classList.remove('hidden', 'is-success', 'is-error');
-    cleanBanner.classList.add('is-progress');
-    cleanBannerSub.parentNode.querySelector('.clean-banner-title').textContent = title;
-    cleanBannerSub.textContent = sub || '';
-    cleanNowBtn.style.display = 'none';
-    cleanDismissBtn.style.display = 'none';
-    let bar = cleanBanner.querySelector('.clean-progress-bar');
-    if (!bar) {
-      bar = document.createElement('div');
-      bar.className = 'clean-progress-bar';
-      bar.innerHTML = '<div class="clean-progress-fill"></div>';
-      cleanBanner.querySelector('.clean-banner-text').appendChild(bar);
-    }
-    const fill = bar.querySelector('.clean-progress-fill');
-    if (indeterminate) {
-      fill.classList.add('indeterminate');
-      fill.style.width = '';
-    } else {
-      fill.classList.remove('indeterminate');
-      fill.style.width = (percent || 0) + '%';
-    }
-  }
-
-  function setBannerDone(book, cleanedBookId, cleanedBlob) {
-    cleanBanner.classList.remove('hidden', 'is-progress', 'is-error');
-    cleanBanner.classList.add('is-success');
-    cleanBanner.querySelector('.clean-banner-title').textContent = '✓ Cleaned book added to library';
-    cleanBannerSub.textContent = 'Open the new "· Cleaned" version, or save the file to your storage card.';
-    const oldBar = cleanBanner.querySelector('.clean-progress-bar');
-    if (oldBar) oldBar.remove();
-
-    cleanNowBtn.style.display = '';
-    cleanNowBtn.textContent = 'Open cleaned';
-    cleanNowBtn.disabled = false;
-    cleanNowBtn.onclick = () => { closeReader(); openBook(cleanedBookId); };
-
-    cleanDismissBtn.style.display = '';
-    cleanDismissBtn.onclick = () => hideCleanBanner();
-
-    // Add a Download button so the user can move it to their storage card.
-    let dl = cleanBanner.querySelector('.clean-download-btn');
-    if (!dl) {
-      dl = document.createElement('button');
-      dl.className = 'btn-icon clean-download-btn';
-      dl.setAttribute('aria-label', 'Download cleaned PDF');
-      dl.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7l7-7z"/></svg>';
-      cleanBanner.querySelector('.clean-banner-actions').insertBefore(dl, cleanDismissBtn);
-    }
-    dl.onclick = () => {
-      const url = URL.createObjectURL(cleanedBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = (book.title || 'book') + ' (cleaned).pdf';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    };
-  }
-
-  function setBannerError(message) {
-    cleanBanner.classList.remove('hidden', 'is-progress', 'is-success');
-    cleanBanner.classList.add('is-error');
-    cleanBanner.querySelector('.clean-banner-title').textContent = '✗ Couldn\'t clean this book';
-    cleanBannerSub.textContent = message;
-    const oldBar = cleanBanner.querySelector('.clean-progress-bar');
-    if (oldBar) oldBar.remove();
-    cleanNowBtn.style.display = '';
-    cleanNowBtn.textContent = 'Try again';
-    cleanNowBtn.disabled = false;
-    cleanNowBtn.onclick = () => {
-      const dlBtn = cleanBanner.querySelector('.clean-download-btn');
-      if (dlBtn) dlBtn.remove();
-      const cleanedHooks = window._cleanCtx;
-      if (cleanedHooks) runCleanFlow(cleanedHooks.book);
-    };
-  }
-
-  async function runCleanFlow(book) {
-    const token = await pdfStudioToken();
-    if (!token) {
-      showToast('Add your PDF Studio password in Settings first.', 3500);
-      openDrawer(settingsDrawer);
-      setTimeout(() => pdfStudioPasswordInput && pdfStudioPasswordInput.focus(), 200);
-      return;
-    }
-    window._cleanCtx = { book };
-    try {
-      // 1. Upload PDF
-      setBannerProgress('Cleaning…', 'Uploading to PDF Studio on the Mac mini', true, 0);
-      const blob = new Blob([book.data], { type: 'application/pdf' });
-      const fd = new FormData();
-      fd.append('file', blob, (book.title || 'book') + '.pdf');
-      const upRes = await fetch(PDF_STUDIO_BASE + '/analyze', {
-        method: 'POST', body: fd,
-        headers: { 'X-PDF-Studio-Auth': token },
-      });
-      if (!upRes.ok) {
-        const t = await upRes.text().catch(() => '');
-        throw new Error('Upload failed (HTTP ' + upRes.status + '). ' + t.slice(0, 80));
-      }
-      const job = await upRes.json();
-      const jobId = job.id || job.job_id;
-      if (!jobId) throw new Error('No job id in response.');
-
-      // 2. Poll status until analyzed (this is where OCR runs for scans —
-      // can take 5–15 min on a long book).
-      setBannerProgress('Cleaning…',
-        'Reading the pages on your Mac mini. Long scanned books can take 5–15 minutes.',
-        true, 0);
-      let lastStatus = '';
-      let pageCount = 0;
-      while (true) {
-        await new Promise(r => setTimeout(r, 4000));
-        const r = await fetch(PDF_STUDIO_BASE + '/status/' + jobId, {
-          headers: { 'X-PDF-Studio-Auth': token },
-        });
-        if (!r.ok) throw new Error('Status check failed (HTTP ' + r.status + ').');
-        const s = await r.json();
-        if (s.page_count) pageCount = s.page_count;
-        if (s.status === 'analyzed') break;
-        if (s.status === 'error' || s.status === 'failed') {
-          throw new Error(s.message || 'Server reported failure.');
-        }
-        if (s.status !== lastStatus) {
-          lastStatus = s.status;
-          const niceMsg = (s.message || '').trim() || s.status;
-          setBannerProgress('Cleaning…', niceMsg, true, 0);
-        }
-      }
-
-      // 3. Build the clean PDF — server returns the bytes directly.
-      // Use page_ranges spanning the whole book to bypass PDF Studio's
-      // chapter detector. The detector is tuned for audiobook narration
-      // (it deliberately drops front-matter, indices, etc.); for a Reader
-      // clean we want the full text. Falling back to a huge upper bound
-      // if page_count wasn't reported — the server clamps to the real total.
-      const upper = pageCount || 999999;
-      setBannerProgress('Cleaning…', 'Building the clean PDF…', true, 0);
-      const buildRes = await fetch(PDF_STUDIO_BASE + '/export-clean-pdf', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-PDF-Studio-Auth': token,
-        },
-        body: JSON.stringify({ job_id: jobId, page_ranges: '1-' + upper }),
-      });
-      if (!buildRes.ok) {
-        const t = await buildRes.text().catch(() => '');
-        throw new Error('Build failed (HTTP ' + buildRes.status + '). ' + t.slice(0, 80));
-      }
-      const cleanedBuf = await buildRes.arrayBuffer();
-      const cleanedBlob = new Blob([cleanedBuf], { type: 'application/pdf' });
-
-      // 4. Save as a NEW book (original is left alone)
-      const newId = 'b_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
-      const cleanedBook = {
-        id: newId,
-        title: (book.title || 'Book') + ' · Cleaned',
-        author: book.author || '',
-        format: 'pdf',
-        size: cleanedBuf.byteLength,
-        cover: book.cover || null,
-        data: cleanedBuf,
-        addedAt: Date.now(),
-        lastOpened: null,
-      };
-      await DB.addBook(cleanedBook);
-
-      // 5. Mark the original so we don't re-prompt next time it's opened
-      const dismissed = JSON.parse(localStorage.getItem(PDF_STUDIO_DISMISS_KEY) || '[]');
-      if (!dismissed.includes(book.id)) dismissed.push(book.id);
-      localStorage.setItem(PDF_STUDIO_DISMISS_KEY, JSON.stringify(dismissed));
-
-      setBannerDone(book, newId, cleanedBlob);
-    } catch (e) {
-      console.error('[Clean]', e);
-      setBannerError(e.message || 'Something went wrong.');
-    }
-  }
-
-  // PDF Studio password input wiring
-  if (pdfStudioPasswordInput) {
-    let saveTimer;
-    const setStatus = (text, ok) => {
-      pdfStudioStatus.textContent = text;
-      pdfStudioStatus.style.color = ok === true ? '#4caf81'
-        : ok === false ? '#c75c5c' : '';
-    };
-    pdfStudioPasswordInput.addEventListener('input', () => {
-      clearTimeout(saveTimer);
-      const pw = pdfStudioPasswordInput.value.trim();
-      if (!pw) { setStatus('Enter your PDF Studio password to enable scan cleaning.'); return; }
-      setStatus('Checking…');
-      saveTimer = setTimeout(async () => {
-        const ok = await setPdfStudioPassword(pw);
-        if (ok) {
-          setStatus('Connected — scan cleaning is now enabled.', true);
-        } else {
-          setStatus('That password didn\'t work. Try again.', false);
-        }
-      }, 500);
-    });
-    // Show "already connected" if a token exists
-    pdfStudioToken().then(t => {
-      if (t) setStatus('Connected — scan cleaning is enabled. (Re-enter to update.)', true);
-    });
-  }
 
   // -------------------- Init --------------------
   (async function init() {
