@@ -5,7 +5,12 @@ const Reader = (() => {
     kind: null,          // 'epub' | 'pdf' | 'txt'
     book: null,          // book record (id, title, author, format, data)
     epub: { book: null, rendition: null, locations: null },
-    pdf: { doc: null, page: 1, pages: 1, rendering: false },
+    pdf: {
+      doc: null, page: 1, pages: 1, rendering: false,
+      cache: new Map(),       // pageNum → { bitmap, maxW, dpr } — LRU
+      prerendering: new Set(),// pages currently being prerendered
+      maxCache: 4,            // current + N±1 + 1 spare; modest for BOOX
+    },
     txt: { text: '', pos: 0 },
     theme: 'dark',
     fontScale: 0,        // -2..+4
@@ -175,26 +180,130 @@ const Reader = (() => {
     if (state.onReady) state.onReady();
   }
 
-  async function renderPdf() {
-    if (!state.pdf.doc || state.pdf.rendering) return;
-    state.pdf.rendering = true;
-    const canvas = document.getElementById('pdf-canvas');
-    const ctx = canvas.getContext('2d');
-    const page = await state.pdf.doc.getPage(state.pdf.page);
-    const area = document.getElementById('pdf-area');
-    const maxW = Math.max(320, area.clientWidth - 16);
+  // Render a single PDF page off-screen and return an ImageBitmap (or the
+  // canvas itself on browsers that lack createImageBitmap).
+  async function renderPdfPageToBitmap(pageNum, maxW, dpr) {
+    const page = await state.pdf.doc.getPage(pageNum);
     const viewport0 = page.getViewport({ scale: 1 });
     const scale = maxW / viewport0.width;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     const viewport = page.getViewport({ scale: scale * dpr });
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    canvas.style.width = (viewport.width / dpr) + 'px';
-    canvas.style.height = (viewport.height / dpr) + 'px';
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    state.pdf.rendering = false;
-    const progress = state.pdf.pages ? (state.pdf.page - 1) / state.pdf.pages : 0;
-    if (state.onLocationChange) state.onLocationChange({ page: state.pdf.page, progress });
+    const off = document.createElement('canvas');
+    off.width = viewport.width;
+    off.height = viewport.height;
+    const offCtx = off.getContext('2d', { alpha: false });
+    await page.render({ canvasContext: offCtx, viewport }).promise;
+    if (typeof createImageBitmap === 'function') {
+      try { return await createImageBitmap(off); } catch (_) { return off; }
+    }
+    return off;
+  }
+
+  function drawPdfBitmap(bitmap, dpr) {
+    const canvas = document.getElementById('pdf-canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.style.width = (bitmap.width / dpr) + 'px';
+    canvas.style.height = (bitmap.height / dpr) + 'px';
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.drawImage(bitmap, 0, 0);
+  }
+
+  function pdfCacheTouch(pageNum) {
+    // Re-insert at end → marks as most-recently-used in Map insertion order.
+    const v = state.pdf.cache.get(pageNum);
+    if (v) { state.pdf.cache.delete(pageNum); state.pdf.cache.set(pageNum, v); }
+  }
+
+  function pdfCacheEvict() {
+    while (state.pdf.cache.size > state.pdf.maxCache) {
+      const oldest = state.pdf.cache.keys().next().value;
+      const v = state.pdf.cache.get(oldest);
+      try { if (v && v.bitmap && v.bitmap.close) v.bitmap.close(); } catch (_) {}
+      state.pdf.cache.delete(oldest);
+    }
+  }
+
+  function pdfClearCache() {
+    for (const v of state.pdf.cache.values()) {
+      try { if (v && v.bitmap && v.bitmap.close) v.bitmap.close(); } catch (_) {}
+    }
+    state.pdf.cache.clear();
+    state.pdf.prerendering.clear();
+  }
+
+  function schedulePdfPrerender(pageNum) {
+    if (!state.pdf.doc) return;
+    if (pageNum < 1 || pageNum > state.pdf.pages) return;
+    if (state.pdf.cache.has(pageNum) || state.pdf.prerendering.has(pageNum)) return;
+    state.pdf.prerendering.add(pageNum);
+
+    const run = async () => {
+      try {
+        // Bail if the user navigated away to a different format
+        if (state.kind !== 'pdf' || !state.pdf.doc) return;
+        const area = document.getElementById('pdf-area');
+        if (!area) return;
+        const maxW = Math.max(320, area.clientWidth - 16);
+        const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+        const bitmap = await renderPdfPageToBitmap(pageNum, maxW, dpr);
+        if (state.kind !== 'pdf' || !state.pdf.doc) return;
+        state.pdf.cache.set(pageNum, { bitmap, maxW, dpr });
+        pdfCacheEvict();
+      } catch (_) {
+        // Background failure is fine — main render path will redo it.
+      } finally {
+        state.pdf.prerendering.delete(pageNum);
+      }
+    };
+
+    // Use idle time on capable browsers; fall back to setTimeout on the BOOX
+    // and other older Chromium builds that don't ship requestIdleCallback.
+    if (window.requestIdleCallback) {
+      requestIdleCallback(run, { timeout: 1500 });
+    } else {
+      setTimeout(run, 80);
+    }
+  }
+
+  async function renderPdf() {
+    if (!state.pdf.doc) return;
+    const pageNum = state.pdf.page;
+    const area = document.getElementById('pdf-area');
+    const maxW = Math.max(320, area.clientWidth - 16);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+
+    // Cache hit → blit instantly. This is the swipe-feels-magical path.
+    const cached = state.pdf.cache.get(pageNum);
+    if (cached && cached.maxW === maxW && cached.dpr === dpr) {
+      drawPdfBitmap(cached.bitmap, dpr);
+      pdfCacheTouch(pageNum);
+      const progress = state.pdf.pages ? (pageNum - 1) / state.pdf.pages : 0;
+      if (state.onLocationChange) state.onLocationChange({ page: pageNum, progress });
+      // Keep the buffer ahead of the user
+      schedulePdfPrerender(pageNum + 1);
+      schedulePdfPrerender(pageNum - 1);
+      return;
+    }
+
+    // Viewport changed (resize / rotation) — old bitmaps are at the wrong size.
+    if (cached) pdfClearCache();
+
+    if (state.pdf.rendering) return;
+    state.pdf.rendering = true;
+    try {
+      const bitmap = await renderPdfPageToBitmap(pageNum, maxW, dpr);
+      drawPdfBitmap(bitmap, dpr);
+      state.pdf.cache.set(pageNum, { bitmap, maxW, dpr });
+      pdfCacheEvict();
+    } finally {
+      state.pdf.rendering = false;
+    }
+    const progress = state.pdf.pages ? (pageNum - 1) / state.pdf.pages : 0;
+    if (state.onLocationChange) state.onLocationChange({ page: pageNum, progress });
+
+    // Pre-fetch the neighbours during idle time for instant swipe.
+    schedulePdfPrerender(pageNum + 1);
+    schedulePdfPrerender(pageNum - 1);
   }
 
   // -------------------- TXT --------------------
@@ -401,14 +510,21 @@ const Reader = (() => {
     if (state.epub.book) { try { state.epub.book.destroy(); } catch (_) {} }
     state.epub = { book: null, rendition: null, locations: null };
     if (state.pdf.doc) { try { state.pdf.doc.destroy(); } catch (_) {} }
-    state.pdf = { doc: null, page: 1, pages: 1, rendering: false };
+    pdfClearCache();
+    state.pdf = {
+      doc: null, page: 1, pages: 1, rendering: false,
+      cache: new Map(), prerendering: new Set(), maxCache: 4,
+    };
     state.txt = { text: '', pos: 0 };
     state.kind = null;
     state.book = null;
   }
 
   function onResize() {
-    if (state.kind === 'pdf') renderPdf();
+    if (state.kind === 'pdf') {
+      pdfClearCache();   // bitmaps are sized for the old viewport
+      renderPdf();
+    }
   }
 
   window.addEventListener('resize', onResize);
