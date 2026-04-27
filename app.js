@@ -33,6 +33,8 @@
   const cleanBannerSub = el('clean-banner-sub');
   const cleanNowBtn = el('clean-now-btn');
   const cleanDismissBtn = el('clean-dismiss-btn');
+  const cleanPdfGroup = el('clean-pdf-group');
+  const cleanPdfBtn = el('clean-pdf-btn');
   const pdfStudioPasswordInput = el('pdf-studio-password');
   const pdfStudioStatus = el('pdf-studio-status');
   const rateLabel = el('rate-label');
@@ -341,12 +343,18 @@
       st.lastOpened = Date.now();
       await DB.setState(st);
       app.currentState = st;
-      // Scan-detection banner — only for PDFs, only when not already cleaned
-      // and not previously dismissed for this book.
+      // Show the manual "Clean with PDF Studio" button for ANY PDF that isn't
+      // already a cleaned version. Lives in the Reader Settings drawer.
+      const isPdf = book.format === 'pdf' && !/·\s*Cleaned/i.test(book.title || '');
+      if (cleanPdfGroup) cleanPdfGroup.style.display = isPdf ? '' : 'none';
+      if (cleanPdfBtn) cleanPdfBtn.onclick = () => {
+        closeAllDrawers();
+        runCleanFlow(book);
+      };
+
+      // Auto banner — only when scan detected, not already cleaned, not previously dismissed.
       hideCleanBanner();
-      if (book.format === 'pdf'
-          && !/·\s*Cleaned/i.test(book.title || '')
-          && Reader.state.pdf.doc) {
+      if (isPdf && Reader.state.pdf.doc) {
         const dismissed = JSON.parse(localStorage.getItem(PDF_STUDIO_DISMISS_KEY) || '[]');
         if (!dismissed.includes(book.id)) {
           isProbablyScan(Reader.state.pdf.doc).then((scan) => {

@@ -1,5 +1,5 @@
 // Simple offline-first service worker — caches the app shell.
-const CACHE = 'reader-shell-v9-cleanflow';
+const CACHE = 'reader-shell-v10-cleanbutton';
 const ASSETS = [
   './',
   './index.html',

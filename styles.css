@@ -446,6 +446,19 @@ input, select { font: inherit; color: inherit; }
 #reader.theme-dark #pdf-area { background: #0f1a2c; }
 #reader.theme-dark #txt-body { color: #e8ecf4; }
 
+/* "Clean with PDF Studio" button in the Reader Settings drawer */
+.btn-primary.block {
+  display: block;
+  width: 100%;
+  padding: 11px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 4px;
+  margin-bottom: 6px;
+  text-align: center;
+  justify-content: center;
+}
+
 /* Scanned-PDF "Clean now" banner */
 .clean-banner {
   display: flex;
