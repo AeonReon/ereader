@@ -1,20 +1,18 @@
 // Read-aloud engine.
 //
 // Two engines, one API:
-//   - "echo"  → Kokoro neural TTS via the Mac mini (https://tts.aiprofits.cc).
-//               Same Echo voice used in PDF Studio and the AI chat. Sounds great.
-//   - "web"   → the browser's built-in SpeechSynthesis (works offline, sounds robotic on iOS).
+//   - "echo"  → Kokoro neural TTS via the Mac mini (https://tts.aiprofits.cc),
+//               played back through the Web Audio API for sample-accurate,
+//               gapless playback with no boundary clicks.
+//   - "web"   → the browser's built-in SpeechSynthesis (works offline,
+//               sounds robotic on iOS — used as a fallback only).
 //
-// Echo is the default. If a fetch fails (Mac mini sleeping, no internet) we silently
-// fall back to "web" mid-stream so playback never just dies.
-//
-// Gapless playback: two persistent <audio> elements ping-pong. While element A
-// plays chunk N, we fetch and pre-load chunk N+1 into element B (preload='auto'
-// = browser starts decoding it). When A's `ended` fires we immediately call
-// B.play() — the audio is already buffered so there's no load gap and no click.
-//
-// Stopping is robust: aborts in-flight fetches, pauses both audio elements,
-// cancels any queued speech utterances, clears state.
+// Why Web Audio API and not <audio>: HTML5 audio elements have a load+decode
+// gap when you swap their `src` between chunks (~50–200ms), which sounds like
+// a tick. Two-element ping-pong with iOS's gesture-priming requirement also
+// produces comb-filtering ("talking in a can") when the priming clip races
+// with the real chunk. Web Audio decodes ahead of time and schedules each
+// chunk on the audio clock, so there's no gap and no overlap — ever.
 const TTS = (() => {
   const ECHO_ENDPOINT = 'https://tts.aiprofits.cc/api/tts';
   const ECHO_VOICE = 'am_echo';
@@ -22,22 +20,28 @@ const TTS = (() => {
 
   const state = {
     rate: 1.0,
-    voiceURI: null,        // Web Speech voice URI (used only when Echo is off)
+    voiceURI: null,
     useEcho: true,
-    engine: 'echo',        // active engine for current playback ('echo' | 'web')
+    engine: 'echo',
     playing: false,
     paused: false,
     chunks: [],
-    cursor: 0,             // index of the chunk currently playing
+    cursor: 0,
     onChunkStart: null,
     onChunkEnd: null,
     onStop: null,
+    // Bumped every time play() or stop() is called. Lets in-flight async work
+    // (fetch, decodeAudioData, web-speech callbacks) detect "I'm from a stale
+    // session" and bail out instead of acting on a new playback by accident.
+    sessionId: 0,
     // Web Speech
     voices: [],
     currentUtterance: null,
-    // Echo — two ping-pong audio elements + matching prefetch slots
-    audios: null,          // [HTMLAudioElement, HTMLAudioElement]
-    activeIdx: 0,          // which audio is currently playing (0 or 1)
+    // Web Audio
+    audioCtx: null,
+    activeSources: new Set(),
+    nextStartTime: 0,
+    schedulingChunkIdx: 0,
     abortController: null,
   };
 
@@ -62,23 +66,13 @@ const TTS = (() => {
         || list[0];
   }
 
-  // ── Persistent audio elements. iOS only honours autoplay on elements first
-  // .play()ed inside a user gesture, so we keep them and reuse forever. We
-  // prime BOTH on the first user gesture so element B can play later without
-  // its own gesture (handled in play()).
-  function getAudios() {
-    if (!state.audios) {
-      const make = () => {
-        const a = new Audio();
-        a.preload = 'auto';
-        a.playsInline = true;
-        a._chunkIdx = -1;
-        a._url = null;
-        return a;
-      };
-      state.audios = [make(), make()];
+  function getAudioContext() {
+    if (!state.audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      state.audioCtx = new Ctx();
     }
-    return state.audios;
+    return state.audioCtx;
   }
 
   // ── Sentence-aware chunking (~280 chars max per chunk) ──────────────────
@@ -98,8 +92,7 @@ const TTS = (() => {
     return out;
   }
 
-  // ── Echo: fetch one chunk's audio. Throws AbortError on stop. ────────────
-  async function fetchEchoChunk(text, signal) {
+  async function fetchEchoBytes(text, signal) {
     const r = await fetch(ECHO_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -107,151 +100,139 @@ const TTS = (() => {
       signal,
     });
     if (!r.ok) throw new Error('echo http ' + r.status);
-    const blob = await r.blob();
-    return URL.createObjectURL(blob);
+    return await r.arrayBuffer();
   }
 
-  // ── Pre-load chunk `chunkIdx` into audio element `elIdx` so it's ready to
-  // play instantly when the active element finishes. Returns when the URL
-  // is set on the element (browser decodes it in the background).
-  async function preloadInto(elIdx, chunkIdx) {
-    if (!state.playing) return;
-    if (chunkIdx < 0 || chunkIdx >= state.chunks.length) return;
-    const el = state.audios[elIdx];
-    // Already preloaded? skip
-    if (el._chunkIdx === chunkIdx && el._url) return;
+  // Fetch chunk N, decode, schedule it on the audio clock, then schedule N+1.
+  async function scheduleNextChunk(sessionId) {
+    if (sessionId !== state.sessionId || !state.playing) return;
+    const idx = state.schedulingChunkIdx;
+    if (idx >= state.chunks.length) return;
+    state.schedulingChunkIdx = idx + 1;
 
-    let url;
+    let buffer;
     try {
-      url = await fetchEchoChunk(state.chunks[chunkIdx], state.abortController.signal);
+      const arrayBuffer = await fetchEchoBytes(
+        state.chunks[idx],
+        state.abortController.signal
+      );
+      if (sessionId !== state.sessionId || !state.playing) return;
+      const ctx = getAudioContext();
+      if (!ctx) throw new Error('no audio context');
+      buffer = await ctx.decodeAudioData(arrayBuffer);
     } catch (e) {
-      if (e.name === 'AbortError' || !state.playing) return;
-      // Network failure — fall back happens lazily when handing-over to this slot
-      return;
+      if (e.name === 'AbortError' || sessionId !== state.sessionId || !state.playing) return;
+      console.warn('[TTS] Echo unreachable, falling back to device voice:', e.message);
+      state.engine = 'web';
+      state.cursor = idx;
+      return speakWebChunk(sessionId);
     }
-    if (!state.playing) { URL.revokeObjectURL(url); return; }
-    // Free any previous URL on this element
-    if (el._url) { URL.revokeObjectURL(el._url); el._url = null; }
-    el.src = url;
-    el._url = url;
-    el._chunkIdx = chunkIdx;
-    try { el.load(); } catch (_) {}
-  }
+    if (sessionId !== state.sessionId || !state.playing) return;
 
-  // ── Play whichever audio element holds chunk `chunkIdx`. If it isn't loaded
-  // yet, load synchronously here.
-  async function playFromCursor() {
-    if (!state.playing) return;
-    if (state.cursor >= state.chunks.length) return finish();
+    const ctx = getAudioContext();
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
 
-    const elIdx = state.activeIdx;
-    const el = state.audios[elIdx];
+    const startAt = Math.max(ctx.currentTime + 0.005, state.nextStartTime);
+    state.nextStartTime = startAt + buffer.duration;
+    state.activeSources.add(source);
 
-    // If the active element doesn't already have our chunk loaded, fetch it now.
-    if (el._chunkIdx !== state.cursor) {
-      try {
-        const url = await fetchEchoChunk(state.chunks[state.cursor], state.abortController.signal);
-        if (!state.playing) { URL.revokeObjectURL(url); return; }
-        if (el._url) URL.revokeObjectURL(el._url);
-        el.src = url;
-        el._url = url;
-        el._chunkIdx = state.cursor;
-      } catch (e) {
-        if (e.name === 'AbortError' || !state.playing) return;
-        // Echo unreachable mid-playback → finish remaining chunks via Web Speech
-        console.warn('[TTS] Echo unreachable, falling back to device voice:', e.message);
-        state.engine = 'web';
-        return speakWebChunk();
+    const startsInMs = Math.max(0, (startAt - ctx.currentTime) * 1000);
+    setTimeout(() => {
+      if (sessionId !== state.sessionId || !state.activeSources.has(source)) return;
+      state.cursor = idx;
+      if (state.onChunkStart) state.onChunkStart(idx, state.chunks[idx]);
+    }, startsInMs);
+
+    source.onended = () => {
+      state.activeSources.delete(source);
+      if (sessionId !== state.sessionId) return;
+      if (state.onChunkEnd) state.onChunkEnd(idx);
+      // Last chunk, no more sources scheduled → done.
+      if (idx === state.chunks.length - 1 && state.activeSources.size === 0
+          && state.schedulingChunkIdx >= state.chunks.length) {
+        finish(sessionId);
       }
+    };
+    source.start(startAt);
+
+    if (state.schedulingChunkIdx < state.chunks.length) {
+      scheduleNextChunk(sessionId);
     }
-
-    if (state.onChunkStart) state.onChunkStart(state.cursor, state.chunks[state.cursor]);
-
-    el.onended = () => {
-      // Free this chunk's URL right away
-      if (el._url) { URL.revokeObjectURL(el._url); el._url = null; el._chunkIdx = -1; }
-      const finishedIdx = state.cursor;
-      if (state.onChunkEnd) state.onChunkEnd(finishedIdx);
-      state.cursor = finishedIdx + 1;
-      if (!state.playing) return;
-      // Hand off to the OTHER element (which should already be preloaded)
-      state.activeIdx = 1 - elIdx;
-      playFromCursor();
-    };
-    el.onerror = () => {
-      // Skip this chunk and continue
-      if (el._url) { URL.revokeObjectURL(el._url); el._url = null; el._chunkIdx = -1; }
-      state.cursor += 1;
-      state.activeIdx = 1 - elIdx;
-      if (state.playing) playFromCursor();
-    };
-
-    try { await el.play(); } catch (_) { /* iOS gesture race; onended will not fire — recover below */ }
-
-    // Kick off prefetch for the NEXT chunk into the inactive element
-    preloadInto(1 - elIdx, state.cursor + 1);
   }
 
-  function speakWebChunk() {
-    if (!state.playing) return;
-    if (state.cursor >= state.chunks.length) return finish();
-    if (!window.speechSynthesis) return finish();
+  function speakWebChunk(sessionId) {
+    if (sessionId !== state.sessionId || !state.playing) return;
+    if (state.cursor >= state.chunks.length) return finish(sessionId);
+    if (!window.speechSynthesis) return finish(sessionId);
 
     const text = state.chunks[state.cursor];
     const u = new SpeechSynthesisUtterance(text);
     const v = pickWebVoice(); if (v) u.voice = v;
     u.rate = state.rate; u.pitch = 1.0;
-    u.onstart = () => { if (state.onChunkStart) state.onChunkStart(state.cursor, text); };
+    const myCursor = state.cursor;
+    u.onstart = () => {
+      if (sessionId !== state.sessionId) return;
+      if (state.onChunkStart) state.onChunkStart(myCursor, text);
+    };
     u.onend = () => {
-      if (state.onChunkEnd) state.onChunkEnd(state.cursor);
-      state.cursor += 1;
-      if (state.playing) speakWebChunk();
+      if (sessionId !== state.sessionId) return;
+      if (state.onChunkEnd) state.onChunkEnd(myCursor);
+      state.cursor = myCursor + 1;
+      if (state.playing) speakWebChunk(sessionId);
     };
     u.onerror = () => {
-      state.cursor += 1;
-      if (state.playing) speakWebChunk();
+      if (sessionId !== state.sessionId) return;
+      state.cursor = myCursor + 1;
+      if (state.playing) speakWebChunk(sessionId);
     };
     state.currentUtterance = u;
     speechSynthesis.speak(u);
   }
 
-  function finish() {
+  function finish(sessionId) {
+    if (sessionId !== state.sessionId) return;
     state.playing = false;
     state.paused = false;
     if (state.onStop) state.onStop();
   }
 
+  // Stop everything immediately and irreversibly. Bumps sessionId so any
+  // in-flight async callbacks self-abort when they wake up.
   function hardReset() {
+    state.sessionId += 1;
     state.playing = false;
     state.paused = false;
+
+    // Web Speech — cancel() on iOS isn't always immediate, so call it twice
+    // around a microtask boundary to flush more reliably.
     if (window.speechSynthesis) {
       try { speechSynthesis.cancel(); } catch (_) {}
+      Promise.resolve().then(() => {
+        try { speechSynthesis.cancel(); } catch (_) {}
+      });
     }
     state.currentUtterance = null;
+
     if (state.abortController) {
       try { state.abortController.abort(); } catch (_) {}
       state.abortController = null;
     }
-    if (state.audios) {
-      for (const el of state.audios) {
-        try {
-          el.pause();
-          if (el._url) { URL.revokeObjectURL(el._url); el._url = null; }
-          el.removeAttribute('src');
-          el._chunkIdx = -1;
-          el.load();
-        } catch (_) {}
-      }
+
+    // Web Audio — stop and disconnect every scheduled source. .stop() on a
+    // not-yet-started source cancels its scheduled start; on a playing source
+    // it stops immediately. Either way it's safe.
+    for (const src of state.activeSources) {
+      try { src.onended = null; src.stop(); src.disconnect(); } catch (_) {}
     }
+    state.activeSources.clear();
+
+    state.nextStartTime = 0;
+    state.schedulingChunkIdx = 0;
     state.chunks = [];
     state.cursor = 0;
-    state.activeIdx = 0;
   }
-
-  // 1-sample silent WAV — used to "unlock" both audio elements inside the
-  // initial user gesture so element B can play later without its own gesture.
-  const SILENT_WAV =
-    'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
 
   return {
     get voices() { return loadVoices(); },
@@ -264,16 +245,16 @@ const TTS = (() => {
     isUsingFallback: () => state.engine === 'web' && state.useEcho,
 
     // MUST be invoked from a user gesture (click handler) on iOS so that the
-    // first audio.play() / speechSynthesis.speak() is allowed.
+    // first AudioContext.resume() / speechSynthesis.speak() is allowed.
     play(text, hooks = {}) {
-      hardReset();
+      hardReset();                 // bumps sessionId
+      const sessionId = state.sessionId;
       state.chunks = chunk(text);
       if (!state.chunks.length) {
         if (hooks.onStop) hooks.onStop();
         return;
       }
       state.cursor = 0;
-      state.activeIdx = 0;
       state.playing = true;
       state.paused = false;
       state.engine = state.useEcho ? 'echo' : 'web';
@@ -283,45 +264,39 @@ const TTS = (() => {
       state.abortController = new AbortController();
 
       if (state.engine === 'echo') {
-        // Prime BOTH audio elements with a silent clip inside this gesture so
-        // either one can be .play()'d later without its own gesture (iOS).
-        const audios = getAudios();
-        for (const el of audios) {
-          try {
-            el.src = SILENT_WAV;
-            const p = el.play();
-            if (p && p.then) p.then(() => el.pause()).catch(() => {});
-          } catch (_) {}
+        const ctx = getAudioContext();
+        if (!ctx) {
+          state.engine = 'web';
+          return speakWebChunk(sessionId);
         }
-        // Begin playback (will fetch chunk 0, play, then prefetch chunk 1)
-        playFromCursor();
+        // Resume the context inside the user gesture (iOS "unlock"). Safe to
+        // call even if not suspended — it's a no-op then.
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+        state.nextStartTime = ctx.currentTime + 0.01;
+        scheduleNextChunk(sessionId);
       } else {
-        speakWebChunk();
+        speakWebChunk(sessionId);
       }
     },
 
     pause() {
       if (!state.playing || state.paused) return;
       state.paused = true;
-      if (state.engine === 'echo') {
-        if (state.audios) {
-          try { state.audios[state.activeIdx].pause(); } catch (_) {}
-        }
+      if (state.engine === 'echo' && state.audioCtx) {
+        state.audioCtx.suspend().catch(() => {});
       } else if (window.speechSynthesis) {
         try { speechSynthesis.pause(); } catch (_) {}
       }
     },
-
     resume() {
       if (!state.paused) return;
       state.paused = false;
-      if (state.engine === 'echo') {
-        if (state.audios) state.audios[state.activeIdx].play().catch(() => {});
+      if (state.engine === 'echo' && state.audioCtx) {
+        state.audioCtx.resume().catch(() => {});
       } else if (window.speechSynthesis) {
         try { speechSynthesis.resume(); } catch (_) {}
       }
     },
-
     stop() {
       const cb = state.onStop;
       hardReset();

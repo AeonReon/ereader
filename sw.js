@@ -1,5 +1,5 @@
 // Simple offline-first service worker — caches the app shell.
-const CACHE = 'reader-shell-v6-gapless';
+const CACHE = 'reader-shell-v7-webaudio';
 const ASSETS = [
   './',
   './index.html',
