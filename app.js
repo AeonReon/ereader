@@ -958,6 +958,7 @@
         'Reading the pages on your Mac mini. Long scanned books can take 5–15 minutes.',
         true, 0);
       let lastStatus = '';
+      let pageCount = 0;
       while (true) {
         await new Promise(r => setTimeout(r, 4000));
         const r = await fetch(PDF_STUDIO_BASE + '/status/' + jobId, {
@@ -965,6 +966,7 @@
         });
         if (!r.ok) throw new Error('Status check failed (HTTP ' + r.status + ').');
         const s = await r.json();
+        if (s.page_count) pageCount = s.page_count;
         if (s.status === 'analyzed') break;
         if (s.status === 'error' || s.status === 'failed') {
           throw new Error(s.message || 'Server reported failure.');
@@ -977,6 +979,12 @@
       }
 
       // 3. Build the clean PDF — server returns the bytes directly.
+      // Use page_ranges spanning the whole book to bypass PDF Studio's
+      // chapter detector. The detector is tuned for audiobook narration
+      // (it deliberately drops front-matter, indices, etc.); for a Reader
+      // clean we want the full text. Falling back to a huge upper bound
+      // if page_count wasn't reported — the server clamps to the real total.
+      const upper = pageCount || 999999;
       setBannerProgress('Cleaning…', 'Building the clean PDF…', true, 0);
       const buildRes = await fetch(PDF_STUDIO_BASE + '/export-clean-pdf', {
         method: 'POST',
@@ -984,7 +992,7 @@
           'Content-Type': 'application/json',
           'X-PDF-Studio-Auth': token,
         },
-        body: JSON.stringify({ job_id: jobId }),
+        body: JSON.stringify({ job_id: jobId, page_ranges: '1-' + upper }),
       });
       if (!buildRes.ok) {
         const t = await buildRes.text().catch(() => '');
