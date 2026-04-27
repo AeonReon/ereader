@@ -446,6 +446,75 @@ input, select { font: inherit; color: inherit; }
 #reader.theme-dark #pdf-area { background: #0f1a2c; }
 #reader.theme-dark #txt-body { color: #e8ecf4; }
 
+/* Scanned-PDF "Clean now" banner */
+.clean-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #1c2e58 0%, #16264a 100%);
+  border-bottom: 1px solid rgba(212, 169, 82, 0.35);
+  color: #f0e7d3;
+  font-size: 13.5px;
+  line-height: 1.35;
+}
+.clean-banner.hidden { display: none; }
+.clean-banner-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.clean-banner-title { font-weight: 600; color: #f6efe0; }
+.clean-banner-sub { font-size: 12px; color: #c2cae0; opacity: 0.9; }
+.clean-banner-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.clean-banner .btn-primary {
+  background: var(--gold, #d4a952);
+  color: #1c2e58;
+  border: none;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.clean-banner .btn-primary:disabled {
+  background: #6b7593; color: #cbd2e3; cursor: default;
+}
+.clean-banner.is-progress {
+  background: linear-gradient(180deg, #14233f 0%, #0f1a2c 100%);
+  flex-direction: column;
+  align-items: stretch;
+  padding: 10px 14px 12px;
+}
+.clean-banner.is-progress .clean-banner-text { flex-direction: column; gap: 6px; }
+.clean-progress-bar {
+  height: 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.clean-progress-fill {
+  height: 100%;
+  background: var(--gold, #d4a952);
+  width: 0%;
+  transition: width 0.3s ease;
+}
+.clean-progress-fill.indeterminate {
+  width: 30%;
+  animation: clean-indet 1.4s ease-in-out infinite;
+}
+@keyframes clean-indet {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.clean-banner.is-success {
+  background: linear-gradient(180deg, #18432d 0%, #103324 100%);
+  border-bottom-color: rgba(146, 230, 174, 0.35);
+}
+.clean-banner.is-error {
+  background: linear-gradient(180deg, #4a1f1f 0%, #361616 100%);
+  border-bottom-color: rgba(230, 146, 146, 0.35);
+}
+
 /* TTS active — swap play icon for stop square so the button's role is obvious */
 .tts-active #tts-btn,
 #tts-btn.is-playing { background: rgba(200,160,78,0.22); color: var(--gold); }

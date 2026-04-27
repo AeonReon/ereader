@@ -1,5 +1,5 @@
 // Simple offline-first service worker — caches the app shell.
-const CACHE = 'reader-shell-v8-pdfprerender';
+const CACHE = 'reader-shell-v9-cleanflow';
 const ASSETS = [
   './',
   './index.html',
