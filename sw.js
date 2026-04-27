@@ -1,5 +1,5 @@
 // Simple offline-first service worker — caches the app shell.
-const CACHE = 'reader-shell-v4-echo';
+const CACHE = 'reader-shell-v5-gestures';
 const ASSETS = [
   './',
   './index.html',

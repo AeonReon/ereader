@@ -383,6 +383,54 @@
   nextBtn.addEventListener('click', () => Reader.next());
   progressEl.addEventListener('change', () => Reader.goto(Number(progressEl.value) / 100));
 
+  // Tap-zone + swipe page turning for PDF / TXT.
+  // (EPUB has its own handlers wired inside the rendered iframe — those still
+  // win because touches inside the iframe don't bubble out here.)
+  wireReaderGestures();
+
+  function wireReaderGestures() {
+    const area = document.getElementById('reader-content');
+    if (!area || !window.PointerEvent) return;
+    let downX = 0, downY = 0, downT = 0, tracking = false;
+
+    const isInteractive = (el) =>
+      el && el.closest && el.closest('button, input, select, textarea, a, [role="button"], .drawer, #scrim');
+
+    area.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (isInteractive(e.target)) { tracking = false; return; }
+      tracking = true;
+      downX = e.clientX; downY = e.clientY; downT = Date.now();
+    });
+
+    area.addEventListener('pointerup', (e) => {
+      if (!tracking) return;
+      tracking = false;
+      if (isInteractive(e.target)) return;
+      const dx = e.clientX - downX;
+      const dy = e.clientY - downY;
+      const dt = Date.now() - downT;
+
+      // Horizontal swipe — must be predominantly sideways so vertical TXT
+      // scrolling isn't misread as a page turn.
+      if (dt < 600 && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        if (dx < 0) Reader.next(); else Reader.prev();
+        return;
+      }
+      // Tap — left third = back, right third = forward, middle does nothing.
+      if (dt < 350 && Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+        const rect = area.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const w = rect.width;
+        if (x < w * 0.30) Reader.prev();
+        else if (x > w * 0.70) Reader.next();
+      }
+    });
+
+    // If the pointer leaves or is cancelled, drop tracking so we don't fire spuriously.
+    area.addEventListener('pointercancel', () => { tracking = false; });
+  }
+
   // Keyboard shortcuts when reader active
   window.addEventListener('keydown', (e) => {
     if (!readerView.classList.contains('active')) return;
