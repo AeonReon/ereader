@@ -451,28 +451,57 @@ const Reader = (() => {
   }
 
   async function getCurrentText() {
+    const lines = await getCurrentLines();
+    return lines.join(' ');
+  }
+
+  // Line-aware text extraction. The TTS pipeline uses this to detect and
+  // strip repeated header / footer lines (chapter title at top of every
+  // page, page numbers at the bottom) without altering the visible page.
+  async function getCurrentLines() {
     if (state.kind === 'epub' && state.epub.rendition) {
       const contents = state.epub.rendition.getContents();
-      if (!contents || !contents.length) return '';
+      if (!contents || !contents.length) return [];
       const doc = contents[0].document;
-      if (!doc) return '';
-      return (doc.body.innerText || doc.body.textContent || '').trim();
+      if (!doc) return [];
+      const raw = doc.body.innerText || doc.body.textContent || '';
+      return raw.split(/\r?\n+/).map(l => l.trim()).filter(Boolean);
     }
     if (state.kind === 'pdf' && state.pdf.doc) {
       const page = await state.pdf.doc.getPage(state.pdf.page);
       const tc = await page.getTextContent();
-      return tc.items.map((it) => it.str).join(' ');
+      // Group items into lines by y-coordinate. PDF text items have a
+      // transform matrix [a,b,c,d,e,f] where (e,f) is the position;
+      // f is the baseline y in PDF coords (bottom-up, but consistent
+      // within a page so we can sort/group regardless of orientation).
+      const rows = new Map();
+      for (const it of tc.items) {
+        if (!it.str || !it.str.trim()) continue;
+        // Round y to the nearest 2 units to keep glyphs on the same
+        // visual line in the same row even when they micro-jitter.
+        const y = Math.round((it.transform ? it.transform[5] : 0) / 2) * 2;
+        if (!rows.has(y)) rows.set(y, []);
+        rows.get(y).push(it);
+      }
+      const sortedKeys = Array.from(rows.keys()).sort((a, b) => b - a); // PDF top → bottom = high y → low y
+      const lines = [];
+      for (const y of sortedKeys) {
+        const row = rows.get(y).sort((a, b) =>
+          (a.transform ? a.transform[4] : 0) - (b.transform ? b.transform[4] : 0));
+        const text = row.map(it => it.str).join(' ').replace(/\s+/g, ' ').trim();
+        if (text) lines.push(text);
+      }
+      return lines;
     }
     if (state.kind === 'txt') {
       const a = document.getElementById('txt-area');
-      // Read the visible portion + some ahead.
       const body = document.getElementById('txt-body');
-      if (!a || !body) return state.txt.text;
+      if (!a || !body) return state.txt.text.split(/\r?\n+/).filter(Boolean);
       const per = Math.ceil(state.txt.text.length * (a.clientHeight / Math.max(1, a.scrollHeight)));
       const start = Math.floor(state.txt.text.length * (a.scrollTop / Math.max(1, a.scrollHeight)));
-      return state.txt.text.slice(start, start + per * 3);
+      return state.txt.text.slice(start, start + per * 3).split(/\r?\n+/).map(l => l.trim()).filter(Boolean);
     }
-    return '';
+    return [];
   }
 
   function setTheme(theme) {
@@ -531,7 +560,7 @@ const Reader = (() => {
 
   return {
     load, next, prev, goto, toc, gotoTocItem,
-    currentPosition, getCurrentText,
+    currentPosition, getCurrentText, getCurrentLines,
     setTheme, setFontScale, setFontFamily, setSpacing,
     destroy,
     onProgressChange(cb) { state.onLocationChange = cb; },

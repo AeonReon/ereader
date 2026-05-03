@@ -243,6 +243,10 @@ const TTS = (() => {
     isPlaying: () => state.playing,
     isPaused: () => state.paused,
     isUsingFallback: () => state.engine === 'web' && state.useEcho,
+    // Exposed so the app can pre-compute chunk count + character offsets,
+    // align them with text positions on the page, and drive a "now reading"
+    // marker. play() will produce identical chunks via this same function.
+    chunk(text) { return chunk(text); },
 
     // MUST be invoked from a user gesture (click handler) on iOS so that the
     // first AudioContext.resume() / speechSynthesis.speak() is allowed.

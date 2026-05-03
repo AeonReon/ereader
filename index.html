@@ -84,6 +84,9 @@
     <div id="pdf-area" class="reader-area"><canvas id="pdf-canvas"></canvas></div>
     <div id="txt-area" class="reader-area"><div id="txt-body"></div></div>
     <div id="loading" class="loading hidden">Loading…</div>
+    <!-- "Now reading" position marker on the right margin. Driven by app.js
+         from TTS.onChunkStart events. Only visible while read-aloud is on. -->
+    <div id="reading-marker" class="reading-marker hidden" aria-hidden="true">▶</div>
   </div>
 
   <footer class="reader-bar bottom">

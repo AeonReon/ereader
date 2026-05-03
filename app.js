@@ -330,6 +330,9 @@
       schedulePersist({ position: Reader.currentPosition(), progress: p });
     });
     try {
+      // Reset header / footer skip history — different book = different chrome.
+      app.recentFirstLines = [];
+      app.recentLastLines = [];
       await Reader.load(book);
       const st = await DB.getState(id);
       st.lastOpened = Date.now();
@@ -448,7 +451,7 @@
     // Wait for the page to render, then read the new text.
     await new Promise(r => setTimeout(r, 350));
     if (!app.ttsActive) return;
-    const text = await Reader.getCurrentText();
+    const text = await getReadAloudText();
     if (text && text.trim()) {
       playPageAndAdvance(text);
     } else {
@@ -679,7 +682,7 @@
       TTS.stop();
       return;
     }
-    const text = await Reader.getCurrentText();
+    const text = await getReadAloudText();
     if (!text || !text.trim()) {
       showToast('No readable text on this page.');
       return;
@@ -688,15 +691,117 @@
     playPageAndAdvance(text);
   });
 
+  // ── Header / footer skip filter ────────────────────────────────────────
+  // Some books print "Chapter 5 — The River" at the top of every page and
+  // "Page 124" at the bottom. Read-aloud will dutifully say the chapter
+  // title every page-turn, breaking the flow. We track the last few first
+  // and last lines and strip them from the TTS text (only) when they
+  // repeat — leaving the visible page untouched.
+  app.recentFirstLines = app.recentFirstLines || [];
+  app.recentLastLines = app.recentLastLines || [];
+  // Keep at most this many of each. Three is enough to recognise the
+  // pattern after a couple of pages without false-positives on prose
+  // that legitimately repeats a few words.
+  const HISTORY_DEPTH = 3;
+
+  function normaliseHeaderLine(s) {
+    if (!s) return '';
+    // Lowercase, drop digits (so "Page 12" matches "Page 13"), collapse
+    // whitespace. The pure-digit page-number case becomes empty — handled
+    // by the caller treating "" as "skippable boilerplate, not a match".
+    return s.toLowerCase().replace(/\d+/g, '').replace(/\s+/g, ' ').trim();
+  }
+
+  function filterRepeatedEdges(lines) {
+    if (!lines || !lines.length) return lines || [];
+    const out = lines.slice();
+    const first = out[0];
+    const last = out.length > 1 ? out[out.length - 1] : null;
+
+    // Strip first line if it (normalised) appears in recent first-line
+    // history OR is purely numeric / very short — page numbers float.
+    if (first) {
+      const norm = normaliseHeaderLine(first);
+      const isPageNum = /^[\divxlcm.\-\s]+$/i.test(first.trim()) && first.trim().length < 8;
+      const seenBefore = !!norm && app.recentFirstLines.includes(norm);
+      if (isPageNum || seenBefore) out.shift();
+    }
+    if (last && out.length) {
+      const norm = normaliseHeaderLine(last);
+      const isPageNum = /^[\divxlcm.\-\s]+$/i.test(last.trim()) && last.trim().length < 8;
+      const seenBefore = !!norm && app.recentLastLines.includes(norm);
+      if (isPageNum || seenBefore) out.pop();
+    }
+
+    // Update history with the *original* first / last (unfiltered) so the
+    // next page can match against them. Done after stripping so we always
+    // record what was actually at the edges of this page.
+    if (first) {
+      const norm = normaliseHeaderLine(first);
+      if (norm) {
+        app.recentFirstLines.push(norm);
+        if (app.recentFirstLines.length > HISTORY_DEPTH) app.recentFirstLines.shift();
+      }
+    }
+    if (last) {
+      const norm = normaliseHeaderLine(last);
+      if (norm) {
+        app.recentLastLines.push(norm);
+        if (app.recentLastLines.length > HISTORY_DEPTH) app.recentLastLines.shift();
+      }
+    }
+    return out;
+  }
+
+  // Wraps Reader.getCurrentText() with the header/footer filter. Use this
+  // for TTS only — visible text on the page is unaffected.
+  async function getReadAloudText() {
+    if (Reader.getCurrentLines) {
+      const lines = await Reader.getCurrentLines();
+      return filterRepeatedEdges(lines).join(' ');
+    }
+    return await Reader.getCurrentText();
+  }
+
+  // (history reset is handled inline at openBook(), where Reader.load runs)
+
+  // ── Reading marker (right-margin "you are here" triangle) ─────────────
+  // A rough position cue, not a per-word highlight. Kokoro doesn't return
+  // word-level timing data, so per-word would need a different engine.
+  // Per-chunk vertical position lets the user look away and find their
+  // place again on look-back, which is the actual problem we're solving.
+  function showReadingMarker(chunkIdx, totalChunks) {
+    const marker = document.getElementById('reading-marker');
+    if (!marker) return;
+    marker.classList.remove('hidden');
+    // Bias slightly toward middle so a single chunk doesn't sit at the very
+    // top of the page — feels less tied to the actual text.
+    const denom = Math.max(1, totalChunks - 1);
+    const pct = totalChunks <= 1 ? 0.5 : (chunkIdx / denom);
+    // Map to 6%..94% of the reader-content area so the marker doesn't clip
+    // against the chrome at the edges.
+    marker.style.top = (6 + pct * 88) + '%';
+  }
+  function hideReadingMarker() {
+    const marker = document.getElementById('reading-marker');
+    if (marker) marker.classList.add('hidden');
+  }
+
   // Drives read-aloud across page boundaries. When TTS finishes the last
   // chunk of the current page, onStop fires; we turn the page and recurse.
   // Replaced the old setInterval polling watcher (was racing with onStop's
   // setTtsUI(false) and getting killed before it could advance).
   function playPageAndAdvance(text) {
+    const totalChunks = TTS.chunk(text).length;
+    showReadingMarker(0, totalChunks);
     TTS.play(text, {
+      onChunkStart: (i) => showReadingMarker(i, totalChunks),
       onStop: async () => {
         // User pressed Stop, or the book ran out — bail without advancing.
-        if (!app.ttsActive) return;
+        if (!app.ttsActive) {
+          hideReadingMarker();
+          return;
+        }
         // navigatePage() is mid-flight: it's already going to start the
         // new page itself, so don't auto-advance here too (would skip a page).
         if (app.suppressNextAdvance) {
@@ -715,7 +820,7 @@
           showToast('Finished.');
           return;
         }
-        const nextText = await Reader.getCurrentText();
+        const nextText = await getReadAloudText();
         if (nextText && nextText.trim() && app.ttsActive) {
           playPageAndAdvance(nextText);
         } else {
@@ -733,6 +838,7 @@
       ttsBtn.classList.toggle('is-playing', on);
       ttsBtn.setAttribute('aria-label', on ? 'Stop reading' : 'Read aloud');
     }
+    if (!on) hideReadingMarker();
   }
 
   // Toggle chrome on tap middle (emitted by EPUB engine) — kept simple: always visible

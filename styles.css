@@ -363,6 +363,30 @@ input, select { font: inherit; color: inherit; }
   -webkit-overflow-scrolling: touch;
 }
 .reader-area.active { display: block; }
+
+/* "Now reading" marker — a small triangle on the right margin that tracks
+   roughly where the audio is on the page. Lets you look away, then find
+   your place again. Position is updated per-chunk by app.js. Uses solid
+   black so it renders cleanly on Kaleido-3 e-ink as well as colour. */
+.reading-marker {
+  position: absolute;
+  right: 8px;
+  top: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  font-size: 14px;
+  line-height: 16px;
+  color: #000;
+  text-align: center;
+  z-index: 10;
+  pointer-events: none;
+  opacity: 0.85;
+  transition: top 0.4s ease;
+}
+.reading-marker.hidden { display: none; }
+#reader.theme-dark .reading-marker { color: #ffd166; }
+
 #pdf-area { display: none; text-align: center; background: #1c1c1c; }
 #pdf-area.active { display: flex; align-items: flex-start; justify-content: center; padding: 10px; }
 #pdf-canvas { max-width: 100%; height: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.45); border-radius: 2px; }
