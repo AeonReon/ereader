@@ -210,8 +210,37 @@
 <script src="reader.js"></script>
 <script src="app.js"></script>
 <script>
+  // Register the service worker AND show a "🔄 New version available" banner
+  // when a newer SW is installed and waiting. Without this, PWAs on Android
+  // e-ink tablets get stuck on cached app.js for days because the user has
+  // no signal that a new version exists.
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    window.addEventListener('load', async () => {
+      try {
+        const reg = await navigator.serviceWorker.register('sw.js');
+        const showBanner = () => {
+          if (document.getElementById('sw-update-banner')) return;
+          const b = document.createElement('div');
+          b.id = 'sw-update-banner';
+          b.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#0b6cf2;' +
+            'color:#fff;padding:12px 16px;text-align:center;font-size:14px;font-weight:600;' +
+            'z-index:99999;cursor:pointer;box-shadow:0 -2px 8px rgba(0,0,0,0.3);';
+          b.textContent = '🔄 New version available — tap to reload';
+          b.onclick = () => location.reload();
+          document.body.appendChild(b);
+        };
+        if (reg.waiting) showBanner();
+        reg.addEventListener('updatefound', () => {
+          const sw = reg.installing;
+          if (!sw) return;
+          sw.addEventListener('statechange', () => {
+            if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+              showBanner();
+            }
+          });
+        });
+      } catch (_) { /* ignore */ }
+    });
   }
 </script>
 </body>

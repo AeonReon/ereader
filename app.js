@@ -379,8 +379,8 @@
   }
 
   backBtn.addEventListener('click', closeReader);
-  prevBtn.addEventListener('click', () => Reader.prev());
-  nextBtn.addEventListener('click', () => Reader.next());
+  prevBtn.addEventListener('click', () => navigatePage('prev'));
+  nextBtn.addEventListener('click', () => navigatePage('next'));
   progressEl.addEventListener('change', () => Reader.goto(Number(progressEl.value) / 100));
 
   // Tap-zone + swipe page turning for PDF / TXT.
@@ -414,7 +414,7 @@
       // Horizontal swipe — must be predominantly sideways so vertical TXT
       // scrolling isn't misread as a page turn.
       if (dt < 600 && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-        if (dx < 0) Reader.next(); else Reader.prev();
+        if (dx < 0) navigatePage('next'); else navigatePage('prev');
         return;
       }
       // Tap — left third = back, right third = forward, middle does nothing.
@@ -422,8 +422,8 @@
         const rect = area.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const w = rect.width;
-        if (x < w * 0.30) Reader.prev();
-        else if (x > w * 0.70) Reader.next();
+        if (x < w * 0.30) navigatePage('prev');
+        else if (x > w * 0.70) navigatePage('next');
       }
     });
 
@@ -431,11 +431,36 @@
     area.addEventListener('pointercancel', () => { tracking = false; });
   }
 
+  // Page navigation wrapper — if read-aloud is active, re-sync the TTS to
+  // the new page instead of letting it keep reading the old text. Where
+  // the reader's eyes go, the audio follows.
+  async function navigatePage(direction) {
+    const wasReading = app.ttsActive;
+    if (wasReading) {
+      // Stop current chunk without unsetting ttsActive (so onStop's user-stop
+      // bail doesn't fire), but flag the imminent advance so onStop doesn't
+      // auto-advance either — we'll start the new page ourselves below.
+      app.suppressNextAdvance = true;
+      TTS.stop();
+    }
+    if (direction === 'next') Reader.next(); else Reader.prev();
+    if (!wasReading) return;
+    // Wait for the page to render, then read the new text.
+    await new Promise(r => setTimeout(r, 350));
+    if (!app.ttsActive) return;
+    const text = await Reader.getCurrentText();
+    if (text && text.trim()) {
+      playPageAndAdvance(text);
+    } else {
+      setTtsUI(false);
+    }
+  }
+
   // Keyboard shortcuts when reader active
   window.addEventListener('keydown', (e) => {
     if (!readerView.classList.contains('active')) return;
-    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); Reader.next(); }
-    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); Reader.prev(); }
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); navigatePage('next'); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); navigatePage('prev'); }
     else if (e.key === 'Escape') closeReader();
   });
 
@@ -672,6 +697,12 @@
       onStop: async () => {
         // User pressed Stop, or the book ran out — bail without advancing.
         if (!app.ttsActive) return;
+        // navigatePage() is mid-flight: it's already going to start the
+        // new page itself, so don't auto-advance here too (would skip a page).
+        if (app.suppressNextAdvance) {
+          app.suppressNextAdvance = false;
+          return;
+        }
         const beforePos = JSON.stringify(Reader.currentPosition());
         Reader.next();
         // Give the reader a moment to render the new page before grabbing text.
