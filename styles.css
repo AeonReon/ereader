@@ -364,28 +364,45 @@ input, select { font: inherit; color: inherit; }
 }
 .reader-area.active { display: block; }
 
-/* "Now reading" marker — a small triangle on the right margin that tracks
-   roughly where the audio is on the page. Lets you look away, then find
-   your place again. Position is updated per-chunk by app.js. Uses solid
-   black so it renders cleanly on Kaleido-3 e-ink as well as colour. */
+/* "Now reading" marker — a CSS-drawn triangle on the right margin that
+   tracks roughly where the audio is on the page. Lets you look away,
+   then find your place again. Position is updated per-chunk by app.js.
+   CSS borders rather than an emoji so it renders the same on every
+   device (Brave on stripped Android e-ink doesn't have a reliable
+   emoji font). The pill shape gives contrast against the dark PDF
+   gutter as well as against a light page. */
 .reading-marker {
   position: absolute;
-  right: 8px;
+  right: 4px;
   top: 0;
-  width: 16px;
-  height: 16px;
-  margin-top: -8px;
-  font-size: 14px;
-  line-height: 16px;
-  color: #000;
-  text-align: center;
+  width: 14px;
+  height: 22px;
+  margin-top: -11px;
   z-index: 10;
   pointer-events: none;
-  opacity: 0.85;
   transition: top 0.4s ease;
+  background: #ffd166;
+  border-radius: 4px 0 0 4px;
+  box-shadow: -1px 0 0 rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.35);
+}
+.reading-marker::before {
+  /* Left-pointing triangle so the eye reads it as "this side, the text" */
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  margin-top: -6px;
+  border: 6px solid transparent;
+  border-right-color: #ffd166;
+  filter: drop-shadow(-1px 1px 1px rgba(0,0,0,0.25));
 }
 .reading-marker.hidden { display: none; }
-#reader.theme-dark .reading-marker { color: #ffd166; }
+#reader.theme-dark .reading-marker { background: #ffd166; }
+#reader.theme-dark .reading-marker::before { border-right-color: #ffd166; }
+#reader.theme-light .reading-marker { background: #d4a017; }
+#reader.theme-light .reading-marker::before { border-right-color: #d4a017; }
+#reader.theme-sepia .reading-marker { background: #b8860b; }
+#reader.theme-sepia .reading-marker::before { border-right-color: #b8860b; }
 
 #pdf-area { display: none; text-align: center; background: #1c1c1c; }
 #pdf-area.active { display: flex; align-items: flex-start; justify-content: center; padding: 10px; }

@@ -339,11 +339,28 @@
       await DB.setState(st);
       app.currentState = st;
     } catch (e) {
-      console.error(e);
-      showToast('Couldn\'t open this book — the file may be corrupt.');
+      console.error('openBook failed:', e);
+      // Show the real error so device-specific failures (e.g. EPUB lib not
+      // loading on a stripped Android, IndexedDB quota exhausted) are
+      // diagnosable without dev tools.
+      const detail = e && (e.name || e.message)
+        ? `${e.name || ''}${e.name && e.message ? ': ' : ''}${e.message || ''}`.slice(0, 120)
+        : 'unknown error';
+      showToast(`Open failed — ${detail}`);
       closeReader();
     }
   }
+
+  // Surface what the EPUB libs see at boot so we know if cdnjs is reachable
+  // on a given device (e.g. the BOOX with stripped Google services).
+  window.addEventListener('load', () => {
+    if (typeof window.ePub !== 'function') {
+      console.warn('[ereader] ePub library did not load — EPUB books will not open');
+    }
+    if (typeof window.JSZip !== 'function') {
+      console.warn('[ereader] JSZip library did not load — EPUB books will not open');
+    }
+  });
 
   function schedulePersist(patch) {
     if (!app.currentBookId) return;

@@ -86,7 +86,7 @@
     <div id="loading" class="loading hidden">Loading…</div>
     <!-- "Now reading" position marker on the right margin. Driven by app.js
          from TTS.onChunkStart events. Only visible while read-aloud is on. -->
-    <div id="reading-marker" class="reading-marker hidden" aria-hidden="true">▶</div>
+    <div id="reading-marker" class="reading-marker hidden" aria-hidden="true"></div>
   </div>
 
   <footer class="reader-bar bottom">
@@ -200,12 +200,15 @@
 <div id="toast" class="toast hidden"></div>
 
 <!-- Libraries -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/epub.js/0.3.93/epub.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- Self-hosted to avoid cdnjs outages: cdnjs deleted epub.js 0.3.93
+     (April 2026) which silently broke EPUB loading everywhere. Local
+     copies also mean the app works offline once installed as a PWA. -->
+<script src="vendor/jszip.min.js"></script>
+<script src="vendor/epub.min.js"></script>
+<script src="vendor/pdf.min.js"></script>
 <script>
   if (window['pdfjsLib']) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
   }
 </script>
 <script src="db.js"></script>

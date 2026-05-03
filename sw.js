@@ -2,7 +2,7 @@
 // Bump the version string on every code change so old caches get evicted
 // and PWAs (especially on Android e-ink tablets) actually pick up the
 // new app.js / reader.js / tts.js. Without this bump, cache-first wins.
-const CACHE = 'reader-shell-v15-marker-skipheaders';
+const CACHE = 'reader-shell-v16-self-host-libs';
 const ASSETS = [
   './',
   './index.html',
@@ -12,6 +12,10 @@ const ASSETS = [
   './reader.js',
   './tts.js',
   './manifest.json',
+  './vendor/jszip.min.js',
+  './vendor/epub.min.js',
+  './vendor/pdf.min.js',
+  './vendor/pdf.worker.min.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',
