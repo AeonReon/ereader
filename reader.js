@@ -458,6 +458,46 @@ const Reader = (() => {
   // Line-aware text extraction. The TTS pipeline uses this to detect and
   // strip repeated header / footer lines (chapter title at top of every
   // page, page numbers at the bottom) without altering the visible page.
+  // PDF-only: returns array of { text, h } where h is the text item height
+  // (rough font size in PDF units). Lets the TTS skip filter detect header
+  // and footer lines by their typographic size — much more reliable than
+  // matching repeated text, which fails when chapter titles change content
+  // between chapters but stay the same SIZE the whole way through.
+  async function getCurrentLinesMeta() {
+    if (state.kind !== 'pdf' || !state.pdf.doc) return [];
+    const page = await state.pdf.doc.getPage(state.pdf.page);
+    const tc = await page.getTextContent();
+    // Group items into lines by y-coordinate. PDF text items have a
+    // transform matrix [a,b,c,d,e,f] where (e,f) is the position;
+    // f is the baseline y. Round to 2 units to absorb micro-jitter.
+    const rows = new Map();
+    for (const it of tc.items) {
+      if (!it.str || !it.str.trim()) continue;
+      const y = Math.round((it.transform ? it.transform[5] : 0) / 2) * 2;
+      if (!rows.has(y)) rows.set(y, []);
+      rows.get(y).push(it);
+    }
+    const sortedKeys = Array.from(rows.keys()).sort((a, b) => b - a);
+    const lines = [];
+    for (const y of sortedKeys) {
+      const row = rows.get(y).sort((a, b) =>
+        (a.transform ? a.transform[4] : 0) - (b.transform ? b.transform[4] : 0));
+      const text = row.map(it => it.str).join(' ').replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      // Average height across the row, weighted by item width so a stray
+      // small punctuation glyph doesn't drag the row's apparent size down.
+      let totalH = 0, totalW = 0;
+      for (const it of row) {
+        const w = Math.max(1, it.width || 1);
+        totalH += (it.height || 0) * w;
+        totalW += w;
+      }
+      const h = totalW > 0 ? totalH / totalW : 0;
+      lines.push({ text, h });
+    }
+    return lines;
+  }
+
   async function getCurrentLines() {
     if (state.kind === 'epub' && state.epub.rendition) {
       const contents = state.epub.rendition.getContents();
@@ -468,30 +508,8 @@ const Reader = (() => {
       return raw.split(/\r?\n+/).map(l => l.trim()).filter(Boolean);
     }
     if (state.kind === 'pdf' && state.pdf.doc) {
-      const page = await state.pdf.doc.getPage(state.pdf.page);
-      const tc = await page.getTextContent();
-      // Group items into lines by y-coordinate. PDF text items have a
-      // transform matrix [a,b,c,d,e,f] where (e,f) is the position;
-      // f is the baseline y in PDF coords (bottom-up, but consistent
-      // within a page so we can sort/group regardless of orientation).
-      const rows = new Map();
-      for (const it of tc.items) {
-        if (!it.str || !it.str.trim()) continue;
-        // Round y to the nearest 2 units to keep glyphs on the same
-        // visual line in the same row even when they micro-jitter.
-        const y = Math.round((it.transform ? it.transform[5] : 0) / 2) * 2;
-        if (!rows.has(y)) rows.set(y, []);
-        rows.get(y).push(it);
-      }
-      const sortedKeys = Array.from(rows.keys()).sort((a, b) => b - a); // PDF top → bottom = high y → low y
-      const lines = [];
-      for (const y of sortedKeys) {
-        const row = rows.get(y).sort((a, b) =>
-          (a.transform ? a.transform[4] : 0) - (b.transform ? b.transform[4] : 0));
-        const text = row.map(it => it.str).join(' ').replace(/\s+/g, ' ').trim();
-        if (text) lines.push(text);
-      }
-      return lines;
+      const meta = await getCurrentLinesMeta();
+      return meta.map(m => m.text);
     }
     if (state.kind === 'txt') {
       const a = document.getElementById('txt-area');
@@ -560,7 +578,7 @@ const Reader = (() => {
 
   return {
     load, next, prev, goto, toc, gotoTocItem,
-    currentPosition, getCurrentText, getCurrentLines,
+    currentPosition, getCurrentText, getCurrentLines, getCurrentLinesMeta,
     setTheme, setFontScale, setFontFamily, setSpacing,
     destroy,
     onProgressChange(cb) { state.onLocationChange = cb; },

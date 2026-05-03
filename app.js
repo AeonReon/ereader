@@ -729,25 +729,54 @@
     return s.toLowerCase().replace(/\d+/g, '').replace(/\s+/g, ' ').trim();
   }
 
-  function filterRepeatedEdges(lines) {
+  // Test whether a line is "chrome size" — its average glyph height is
+  // notably different from the page's body-text size. Headers tend to be
+  // smaller (running header) or much larger (chapter title); body lines
+  // cluster tightly around a single size. Threshold: 18% off the median.
+  // Returns null if we don't have height data (non-PDF formats).
+  function isChromeSized(lineMeta, medianH) {
+    if (!lineMeta || !medianH || !lineMeta.h) return null;
+    const ratio = lineMeta.h / medianH;
+    return ratio < 0.82 || ratio > 1.22;
+  }
+
+  function median(values) {
+    if (!values || !values.length) return 0;
+    const s = values.slice().sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+
+  function filterRepeatedEdges(lines, linesMeta) {
     if (!lines || !lines.length) return lines || [];
     const out = lines.slice();
     const first = out[0];
     const last = out.length > 1 ? out[out.length - 1] : null;
 
-    // Strip first line if it (normalised) appears in recent first-line
-    // history OR is purely numeric / very short — page numbers float.
+    // PDF only: compute median body line height so we can detect chrome
+    // by typographic size, not just by repeated text. This catches the
+    // header of the *first* page of every chapter, before history would.
+    let medianH = 0;
+    if (linesMeta && linesMeta.length) {
+      medianH = median(linesMeta.map(m => m.h).filter(h => h > 0));
+    }
+    const firstMeta = linesMeta && linesMeta[0];
+    const lastMeta = linesMeta && linesMeta.length > 1 ? linesMeta[linesMeta.length - 1] : null;
+
+    // Strip first line if: chrome-sized, OR seen-before, OR pure page #.
     if (first) {
       const norm = normaliseHeaderLine(first);
       const isPageNum = /^[\divxlcm.\-\s]+$/i.test(first.trim()) && first.trim().length < 8;
       const seenBefore = !!norm && app.recentFirstLines.includes(norm);
-      if (isPageNum || seenBefore) out.shift();
+      const sizeOdd = isChromeSized(firstMeta, medianH) === true;
+      if (isPageNum || seenBefore || sizeOdd) out.shift();
     }
     if (last && out.length) {
       const norm = normaliseHeaderLine(last);
       const isPageNum = /^[\divxlcm.\-\s]+$/i.test(last.trim()) && last.trim().length < 8;
       const seenBefore = !!norm && app.recentLastLines.includes(norm);
-      if (isPageNum || seenBefore) out.pop();
+      const sizeOdd = isChromeSized(lastMeta, medianH) === true;
+      if (isPageNum || seenBefore || sizeOdd) out.pop();
     }
 
     // Update history with the *original* first / last (unfiltered) so the
@@ -771,11 +800,19 @@
   }
 
   // Wraps Reader.getCurrentText() with the header/footer filter. Use this
-  // for TTS only — visible text on the page is unaffected.
+  // for TTS only — visible text on the page is unaffected. PDF gets the
+  // size-aware path; EPUB / TXT fall back to text-history matching only.
   async function getReadAloudText() {
+    if (Reader.getCurrentLinesMeta) {
+      const meta = await Reader.getCurrentLinesMeta();
+      if (meta && meta.length) {
+        const lines = meta.map(m => m.text);
+        return filterRepeatedEdges(lines, meta).join(' ');
+      }
+    }
     if (Reader.getCurrentLines) {
       const lines = await Reader.getCurrentLines();
-      return filterRepeatedEdges(lines).join(' ');
+      return filterRepeatedEdges(lines, null).join(' ');
     }
     return await Reader.getCurrentText();
   }
@@ -791,13 +828,15 @@
     const marker = document.getElementById('reading-marker');
     if (!marker) return;
     marker.classList.remove('hidden');
-    // Bias slightly toward middle so a single chunk doesn't sit at the very
-    // top of the page — feels less tied to the actual text.
-    const denom = Math.max(1, totalChunks - 1);
-    const pct = totalChunks <= 1 ? 0.5 : (chunkIdx / denom);
-    // Map to 6%..94% of the reader-content area so the marker doesn't clip
-    // against the chrome at the edges.
-    marker.style.top = (6 + pct * 88) + '%';
+    // Position at the *middle* of the current chunk's vertical range, not
+    // its start. onChunkStart fires when the chunk begins playing, but by
+    // the time the user looks at the page mid-chunk, the audio has moved
+    // halfway through it. Mid-chunk positioning makes the marker feel
+    // aligned with where the voice actually is.
+    const pct = totalChunks <= 0 ? 0.5 : ((chunkIdx + 0.5) / totalChunks);
+    // Map to 8%..92% of the reader-content area to keep clear of the
+    // top header / bottom footer regions, which are usually skipped anyway.
+    marker.style.top = (8 + pct * 84) + '%';
   }
   function hideReadingMarker() {
     const marker = document.getElementById('reading-marker');
