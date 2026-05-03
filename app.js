@@ -647,8 +647,11 @@
   ttsBtn.addEventListener('click', async () => {
     if (!app.currentBookId) return;
     if (TTS.isPlaying()) {
-      TTS.stop();
+      // Mark inactive BEFORE TTS.stop() so the onStop callback (which fires
+      // synchronously inside stop()) sees ttsActive=false and skips
+      // auto-advance. Otherwise clicking stop would jump us to the next page.
       setTtsUI(false);
+      TTS.stop();
       return;
     }
     const text = await Reader.getCurrentText();
@@ -657,50 +660,39 @@
       return;
     }
     setTtsUI(true);
-    TTS.play(text, {
-      onStop: () => setTtsUI(false),
-      onChunkEnd: async (i) => {
-        // When we finish the last chunk, auto-advance to the next page and keep reading
-        if (i >= 0 && !TTS.isPlaying()) return;
-      },
-    });
-    // Auto-advance: when TTS finishes the whole page, turn the page and keep going
-    watchTtsForAdvance();
+    playPageAndAdvance(text);
   });
 
-  function watchTtsForAdvance() {
-    // Clear any prior watcher so we never stack intervals (which would make
-    // Reader.next() fire multiple times per page boundary and skip pages).
-    if (app.ttsWatchTimer) clearInterval(app.ttsWatchTimer);
-    app.ttsWatchTimer = setInterval(async () => {
-      if (!app.ttsActive) {
-        clearInterval(app.ttsWatchTimer);
-        app.ttsWatchTimer = null;
-        return;
-      }
-      if (!TTS.isPlaying()) {
-        clearInterval(app.ttsWatchTimer);
-        app.ttsWatchTimer = null;
+  // Drives read-aloud across page boundaries. When TTS finishes the last
+  // chunk of the current page, onStop fires; we turn the page and recurse.
+  // Replaced the old setInterval polling watcher (was racing with onStop's
+  // setTtsUI(false) and getting killed before it could advance).
+  function playPageAndAdvance(text) {
+    TTS.play(text, {
+      onStop: async () => {
+        // User pressed Stop, or the book ran out — bail without advancing.
+        if (!app.ttsActive) return;
         const beforePos = JSON.stringify(Reader.currentPosition());
         Reader.next();
-        setTimeout(async () => {
-          if (!app.ttsActive) return;
-          const afterPos = JSON.stringify(Reader.currentPosition());
-          if (beforePos === afterPos) {
-            setTtsUI(false);
-            showToast('Finished.');
-            return;
-          }
-          const text = await Reader.getCurrentText();
-          if (text && text.trim() && app.ttsActive) {
-            TTS.play(text, { onStop: () => setTtsUI(false) });
-            watchTtsForAdvance();
-          } else {
-            setTtsUI(false);
-          }
-        }, 500);
-      }
-    }, 600);
+        // Give the reader a moment to render the new page before grabbing text.
+        await new Promise(r => setTimeout(r, 400));
+        if (!app.ttsActive) return;  // user may have stopped during the gap
+        const afterPos = JSON.stringify(Reader.currentPosition());
+        if (beforePos === afterPos) {
+          // Reader.next() didn't move — we're at the end of the book.
+          setTtsUI(false);
+          showToast('Finished.');
+          return;
+        }
+        const nextText = await Reader.getCurrentText();
+        if (nextText && nextText.trim() && app.ttsActive) {
+          playPageAndAdvance(nextText);
+        } else {
+          setTtsUI(false);
+          showToast('Finished.');
+        }
+      },
+    });
   }
 
   function setTtsUI(on) {
@@ -709,10 +701,6 @@
     if (ttsBtn) {
       ttsBtn.classList.toggle('is-playing', on);
       ttsBtn.setAttribute('aria-label', on ? 'Stop reading' : 'Read aloud');
-    }
-    if (!on && app.ttsWatchTimer) {
-      clearInterval(app.ttsWatchTimer);
-      app.ttsWatchTimer = null;
     }
   }
 
