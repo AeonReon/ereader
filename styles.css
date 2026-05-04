@@ -404,6 +404,23 @@ input, select { font: inherit; color: inherit; }
 .voice-toggle { font-weight: 700; font-size: 13px; }
 .voice-toggle.is-echo  { color: #d4a017; }
 .voice-toggle.is-apple { color: #6ec1ff; }
+
+/* Voice-picker row with the Test button beside the dropdown. */
+.voice-picker-row { display: flex; gap: 8px; align-items: center; }
+.voice-picker-row #voice-select { flex: 1; min-width: 0; }
+.btn-small {
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong, rgba(212,175,55,0.30));
+  border-radius: 8px;
+  background: rgba(212,175,55,0.08);
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-small:active { transform: scale(0.97); }
+.voice-active-hint { margin-top: 4px; font-size: 11px; opacity: 0.75; }
 #reader.theme-dark .reading-marker { background: #ffd166; }
 #reader.theme-dark .reading-marker::before { border-right-color: #ffd166; }
 #reader.theme-light .reading-marker { background: #d4a017; }

@@ -592,6 +592,7 @@
   settingsBtn.addEventListener('click', async () => {
     openDrawer(settingsDrawer);
     await populateVoices();
+    updateActiveVoiceLabel();
     const u = await DB.usage();
     if (u.quota) storageInfo.textContent = `${formatBytes(u.usage)} used of ${formatBytes(u.quota)} available`;
     else storageInfo.textContent = `${formatBytes(u.usage)} used`;
@@ -703,10 +704,62 @@
     });
   }
 
+  // Update the "Now using: X" label so the user can see exactly which
+  // voice the system has settled on. iOS's voice list is opaque about
+  // which entry maps to which iOS Settings name, so this is the ground
+  // truth — match it against your dropdown choice to confirm they're
+  // the same voice.
+  function updateActiveVoiceLabel() {
+    const lbl = document.getElementById('voice-active-label');
+    if (!lbl) return;
+    const voices = TTS.voices;
+    const v = voices.find(x => x.voiceURI === app.prefs.voiceURI);
+    if (v) {
+      const tier = voiceQualityScore(v) >= 2 ? '✦ ' : '';
+      lbl.textContent = `Now using: ${tier}${v.name} (${v.lang})`;
+    } else if (voices.length) {
+      // Picked URI doesn't match any current voice — iOS may have changed
+      // the URI between sessions. Show what'll be used as fallback.
+      const fallback = voices.find(x => /^en/i.test(x.lang) && x.default)
+                   || voices.find(x => /^en/i.test(x.lang))
+                   || voices[0];
+      lbl.textContent = `Picked voice not available — falling back to: ${fallback ? fallback.name : '(none)'}`;
+    } else {
+      lbl.textContent = 'No voices loaded yet — open after a tap.';
+    }
+  }
+
+  // Test button: speak a sample sentence with the currently selected voice
+  // so the user can audition it without starting a real read-aloud.
+  const voiceTestBtn = document.getElementById('voice-test-btn');
+  if (voiceTestBtn) {
+    voiceTestBtn.addEventListener('click', () => {
+      if (!window.speechSynthesis) {
+        showToast('Speech synthesis not available in this browser');
+        return;
+      }
+      try { speechSynthesis.cancel(); } catch (_) {}
+      const u = new SpeechSynthesisUtterance(
+        'This is the voice the reader will use when Echo is off or offline.'
+      );
+      const all = TTS.voices;
+      const picked = all.find(x => x.voiceURI === app.prefs.voiceURI);
+      if (picked) u.voice = picked;
+      u.rate = app.prefs.rate || 1.0;
+      speechSynthesis.speak(u);
+      // Log full voice list so the user / I can see exactly what iOS exposed.
+      console.log('[ereader] available voices:', all.map(v =>
+        ({ name: v.name, lang: v.lang, uri: v.voiceURI, default: v.default, score: voiceQualityScore(v) })));
+      console.log('[ereader] testing with:', picked ? picked.name : '(no match — using browser default)');
+      updateActiveVoiceLabel();
+    });
+  }
+
   voiceSelect.addEventListener('change', () => {
     app.prefs.voiceURI = voiceSelect.value;
     TTS.setVoice(voiceSelect.value);
     savePrefs();
+    updateActiveVoiceLabel();
   });
   // Sync the Echo toggle, the top-bar quick-button, and the underlying
   // TTS engine — flipping any one updates the others. The quick-button
@@ -748,6 +801,7 @@
   if (window.speechSynthesis) {
     speechSynthesis.addEventListener('voiceschanged', () => {
       if (settingsDrawer.classList.contains('open')) populateVoices();
+      updateActiveVoiceLabel();
     });
   }
   rateEl.addEventListener('input', () => {

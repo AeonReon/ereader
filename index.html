@@ -179,7 +179,11 @@
       <input id="use-echo" type="checkbox" checked>
     </label>
     <label class="device-voice-label">Device voice (used when Echo is off or offline)</label>
-    <select id="voice-select"></select>
+    <div class="voice-picker-row">
+      <select id="voice-select"></select>
+      <button id="voice-test-btn" type="button" class="btn-small" aria-label="Test this voice">▶ Test</button>
+    </div>
+    <div id="voice-active-label" class="hint voice-active-hint">—</div>
     <label class="toggle-row" style="margin-top:6px">
       <span class="hint">Show all installed voices <span class="hint inline">— off shows only Siri/Premium/Enhanced</span></span>
       <input id="show-all-voices" type="checkbox">
