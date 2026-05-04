@@ -397,6 +397,13 @@ input, select { font: inherit; color: inherit; }
   filter: drop-shadow(-1px 1px 1px rgba(0,0,0,0.25));
 }
 .reading-marker.hidden { display: none; }
+
+/* Voice-engine quick toggle in the top bar. Shows "E" for Echo (neural,
+   needs internet) or "A" for Apple voice (offline). Tap to switch — saves
+   a trip into the settings drawer when you're about to lose connection. */
+.voice-toggle { font-weight: 700; font-size: 13px; }
+.voice-toggle.is-echo  { color: #d4a017; }
+.voice-toggle.is-apple { color: #6ec1ff; }
 #reader.theme-dark .reading-marker { background: #ffd166; }
 #reader.theme-dark .reading-marker::before { border-right-color: #ffd166; }
 #reader.theme-light .reading-marker { background: #d4a017; }

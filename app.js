@@ -630,9 +630,9 @@
   }
 
   async function populateVoices() {
-    const voices = TTS.voices;
+    const allVoices = TTS.voices;
     voiceSelect.innerHTML = '';
-    if (!voices.length) {
+    if (!allVoices.length) {
       const o = document.createElement('option');
       o.value = ''; o.textContent = '(system voices loading — pick after opening a book)';
       voiceSelect.appendChild(o);
@@ -641,12 +641,27 @@
     // Auto-pick the best installed Apple voice if the user hasn't chosen
     // one yet — saves them a trip to the dropdown to escape "Samantha".
     if (!app.prefs.voiceURI) {
-      const best = pickBestEnglishVoice(voices);
+      const best = pickBestEnglishVoice(allVoices);
       if (best) {
         app.prefs.voiceURI = best.voiceURI;
         TTS.setVoice(best.voiceURI);
         savePrefs();
       }
+    }
+    // By default, only show high-quality voices (Siri / Premium / Enhanced /
+    // Neural / Natural) — these are the ones the user actually wants. Most
+    // installed voices are old "compact" engines and don't sound great. The
+    // "Show all" toggle restores the long list for anyone who wants it.
+    const showAll = !!app.prefs.showAllVoices;
+    let voices = showAll ? allVoices : allVoices.filter(v => voiceQualityScore(v) >= 2);
+    // If filtering produced nothing (user has no high-quality voices yet),
+    // fall back to the full list and tell them how to fix it.
+    if (!voices.length) {
+      voices = allVoices;
+      const note = document.createElement('option');
+      note.value = ''; note.disabled = true;
+      note.textContent = '— no Enhanced voices installed (iOS Settings → Spoken Content → Voices) —';
+      voiceSelect.appendChild(note);
     }
     const groups = {};
     for (const v of voices) {
@@ -661,8 +676,6 @@
     for (const lang of langs) {
       const g = document.createElement('optgroup');
       g.label = lang;
-      // Within each language, sort high-quality voices to the top so the
-      // user sees Enhanced / Siri / Premium first.
       const sorted = groups[lang].slice().sort((a, b) => {
         const sa = voiceQualityScore(a), sb = voiceQualityScore(b);
         if (sa !== sb) return sb - sa;
@@ -680,21 +693,58 @@
     }
   }
 
+  const showAllVoicesToggle = el('show-all-voices');
+  if (showAllVoicesToggle) {
+    showAllVoicesToggle.checked = !!app.prefs.showAllVoices;
+    showAllVoicesToggle.addEventListener('change', () => {
+      app.prefs.showAllVoices = showAllVoicesToggle.checked;
+      savePrefs();
+      populateVoices();
+    });
+  }
+
   voiceSelect.addEventListener('change', () => {
     app.prefs.voiceURI = voiceSelect.value;
     TTS.setVoice(voiceSelect.value);
     savePrefs();
   });
-  if (useEchoToggle) {
-    useEchoToggle.checked = app.prefs.useEcho !== false;
-    useEchoToggle.addEventListener('change', () => {
-      app.prefs.useEcho = useEchoToggle.checked;
-      TTS.setUseEcho(app.prefs.useEcho);
-      // If currently playing, stop so the next play uses the new engine.
-      if (TTS.isPlaying()) { TTS.stop(); setTtsUI(false); }
-      savePrefs();
-    });
+  // Sync the Echo toggle, the top-bar quick-button, and the underlying
+  // TTS engine — flipping any one updates the others. The quick-button
+  // exists so you can pre-empt going offline ("I'm about to lose signal,
+  // switch to Apple voice now") without diving into settings.
+  const voiceToggleBtn = el('voice-toggle-btn');
+  const voiceToggleLabel = el('voice-toggle-label');
+
+  function reflectEngineMode() {
+    const useEcho = app.prefs.useEcho !== false;
+    if (useEchoToggle) useEchoToggle.checked = useEcho;
+    if (voiceToggleBtn && voiceToggleLabel) {
+      voiceToggleLabel.textContent = useEcho ? 'E' : 'A';
+      voiceToggleBtn.classList.toggle('is-echo', useEcho);
+      voiceToggleBtn.classList.toggle('is-apple', !useEcho);
+      voiceToggleBtn.setAttribute('aria-label',
+        useEcho ? 'Voice: Echo (tap to switch to Apple voice)' : 'Voice: Apple (tap to switch to Echo)');
+      voiceToggleBtn.title = voiceToggleBtn.getAttribute('aria-label');
+    }
   }
+
+  function setEngineMode(useEcho) {
+    app.prefs.useEcho = !!useEcho;
+    TTS.setUseEcho(app.prefs.useEcho);
+    reflectEngineMode();
+    // If currently playing, stop so the next play uses the new engine.
+    if (TTS.isPlaying()) { TTS.stop(); setTtsUI(false); }
+    savePrefs();
+    showToast(useEcho ? '🌐 Echo voice — needs internet' : '📱 Apple voice — works offline');
+  }
+
+  if (useEchoToggle) {
+    useEchoToggle.addEventListener('change', () => setEngineMode(useEchoToggle.checked));
+  }
+  if (voiceToggleBtn) {
+    voiceToggleBtn.addEventListener('click', () => setEngineMode(app.prefs.useEcho === false));
+  }
+  reflectEngineMode();
   if (window.speechSynthesis) {
     speechSynthesis.addEventListener('voiceschanged', () => {
       if (settingsDrawer.classList.contains('open')) populateVoices();
