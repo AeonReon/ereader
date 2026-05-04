@@ -37,11 +37,14 @@ const TTS = (() => {
     // Web Speech
     voices: [],
     currentUtterance: null,
-    // Web Audio
-    audioCtx: null,
-    activeSources: new Set(),
-    nextStartTime: 0,
-    schedulingChunkIdx: 0,
+    // <audio>-element playback (replaces Web Audio scheduling). Single
+    // persistent element so iOS keeps its audio session alive across chunk
+    // transitions — required for lock-screen / background playback. Web
+    // Audio scheduling was beautifully gapless but iOS suspends AudioContext
+    // the moment the screen locks, so it's foreground-only.
+    audioEl: null,
+    blobUrls: new Set(),       // currently-allocated blob URLs (revoked on stop)
+    prefetchPromise: null,     // promise for the chunk we're racing to fetch
     abortController: null,
   };
 
@@ -66,13 +69,16 @@ const TTS = (() => {
         || list[0];
   }
 
-  function getAudioContext() {
-    if (!state.audioCtx) {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return null;
-      state.audioCtx = new Ctx();
+  function getAudioElement() {
+    if (!state.audioEl) {
+      const a = new Audio();
+      a.preload = 'auto';
+      // Tell iOS this is real media so it keeps playing in background.
+      // Without this attribute the element sometimes gets paused on lock.
+      a.setAttribute('playsinline', 'true');
+      state.audioEl = a;
     }
-    return state.audioCtx;
+    return state.audioEl;
   }
 
   // ── Sentence-aware chunking (~280 chars max per chunk) ──────────────────
@@ -103,23 +109,34 @@ const TTS = (() => {
     return await r.arrayBuffer();
   }
 
-  // Fetch chunk N, decode, schedule it on the audio clock, then schedule N+1.
-  async function scheduleNextChunk(sessionId) {
-    if (sessionId !== state.sessionId || !state.playing) return;
-    const idx = state.schedulingChunkIdx;
-    if (idx >= state.chunks.length) return;
-    state.schedulingChunkIdx = idx + 1;
+  // Fetch one chunk, return as a blob URL ready to feed to <audio>.
+  // Tracks the blob URL so hardReset() can revoke it on stop.
+  async function fetchChunkAsBlobUrl(text, signal) {
+    const arrayBuffer = await fetchEchoBytes(text, signal);
+    const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
+    const url = URL.createObjectURL(blob);
+    state.blobUrls.add(url);
+    return url;
+  }
 
-    let buffer;
+  // Play the chunk queue through a single persistent <audio> element.
+  // When chunk N ends, swap in N+1. Pre-fetches N+1 while N plays so the
+  // gap between chunks is as short as possible (still won't be sample-
+  // accurate gapless like the old Web Audio path, but iOS keeps <audio>
+  // playing in background, which Web Audio doesn't).
+  async function playEchoFromIndex(sessionId, idx) {
+    if (sessionId !== state.sessionId || !state.playing) return;
+    if (idx >= state.chunks.length) return finish(sessionId);
+
+    let blobUrl;
     try {
-      const arrayBuffer = await fetchEchoBytes(
-        state.chunks[idx],
-        state.abortController.signal
-      );
+      // If the prefetcher already has this chunk ready, use it; otherwise fetch.
+      if (state.prefetchPromise && state.prefetchPromise._idx === idx) {
+        blobUrl = await state.prefetchPromise;
+      } else {
+        blobUrl = await fetchChunkAsBlobUrl(state.chunks[idx], state.abortController.signal);
+      }
       if (sessionId !== state.sessionId || !state.playing) return;
-      const ctx = getAudioContext();
-      if (!ctx) throw new Error('no audio context');
-      buffer = await ctx.decodeAudioData(arrayBuffer);
     } catch (e) {
       if (e.name === 'AbortError' || sessionId !== state.sessionId || !state.playing) return;
       console.warn('[TTS] Echo unreachable, falling back to device voice:', e.message);
@@ -127,38 +144,49 @@ const TTS = (() => {
       state.cursor = idx;
       return speakWebChunk(sessionId);
     }
-    if (sessionId !== state.sessionId || !state.playing) return;
 
-    const ctx = getAudioContext();
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-
-    const startAt = Math.max(ctx.currentTime + 0.005, state.nextStartTime);
-    state.nextStartTime = startAt + buffer.duration;
-    state.activeSources.add(source);
-
-    const startsInMs = Math.max(0, (startAt - ctx.currentTime) * 1000);
-    setTimeout(() => {
-      if (sessionId !== state.sessionId || !state.activeSources.has(source)) return;
-      state.cursor = idx;
-      if (state.onChunkStart) state.onChunkStart(idx, state.chunks[idx]);
-    }, startsInMs);
-
-    source.onended = () => {
-      state.activeSources.delete(source);
+    const audio = getAudioElement();
+    audio.onended = () => {
       if (sessionId !== state.sessionId) return;
+      try { URL.revokeObjectURL(blobUrl); state.blobUrls.delete(blobUrl); } catch (_) {}
       if (state.onChunkEnd) state.onChunkEnd(idx);
-      // Last chunk, no more sources scheduled → done.
-      if (idx === state.chunks.length - 1 && state.activeSources.size === 0
-          && state.schedulingChunkIdx >= state.chunks.length) {
-        finish(sessionId);
-      }
+      playEchoFromIndex(sessionId, idx + 1);
     };
-    source.start(startAt);
+    audio.onerror = () => {
+      if (sessionId !== state.sessionId) return;
+      console.warn('[TTS] <audio> error on chunk', idx, audio.error);
+      try { URL.revokeObjectURL(blobUrl); state.blobUrls.delete(blobUrl); } catch (_) {}
+      // Fall back to web speech for the rest of the page.
+      state.engine = 'web';
+      state.cursor = idx;
+      speakWebChunk(sessionId);
+    };
+    audio.src = blobUrl;
+    audio.playbackRate = state.rate;
+    state.cursor = idx;
+    if (state.onChunkStart) state.onChunkStart(idx, state.chunks[idx]);
 
-    if (state.schedulingChunkIdx < state.chunks.length) {
-      scheduleNextChunk(sessionId);
+    try {
+      await audio.play();
+    } catch (e) {
+      // Autoplay rejected — most commonly because we're not in a user
+      // gesture chain anymore (e.g. resume from background). Surface as
+      // pause so the lock-screen play button can resume.
+      console.warn('[TTS] audio.play() rejected:', e.name, e.message);
+      state.paused = true;
+      return;
+    }
+
+    // Pre-fetch the next chunk while this one plays so the swap gap stays
+    // small. Track the index on the promise so we don't reuse it for a
+    // different chunk after a stop/replay.
+    if (idx + 1 < state.chunks.length) {
+      const p = fetchChunkAsBlobUrl(state.chunks[idx + 1], state.abortController.signal)
+        .catch(e => { if (e.name !== 'AbortError') console.warn('[TTS] prefetch failed:', e.message); return null; });
+      p._idx = idx + 1;
+      state.prefetchPromise = p;
+    } else {
+      state.prefetchPromise = null;
     }
   }
 
@@ -220,16 +248,24 @@ const TTS = (() => {
       state.abortController = null;
     }
 
-    // Web Audio — stop and disconnect every scheduled source. .stop() on a
-    // not-yet-started source cancels its scheduled start; on a playing source
-    // it stops immediately. Either way it's safe.
-    for (const src of state.activeSources) {
-      try { src.onended = null; src.stop(); src.disconnect(); } catch (_) {}
+    // <audio> path: pause, drop the current source, revoke any blob URLs we
+    // allocated. Don't destroy the element itself — keeping it alive lets
+    // a follow-up play() resume in the same iOS audio session.
+    if (state.audioEl) {
+      try {
+        state.audioEl.onended = null;
+        state.audioEl.onerror = null;
+        state.audioEl.pause();
+        state.audioEl.removeAttribute('src');
+        state.audioEl.load();
+      } catch (_) {}
     }
-    state.activeSources.clear();
+    for (const url of state.blobUrls) {
+      try { URL.revokeObjectURL(url); } catch (_) {}
+    }
+    state.blobUrls.clear();
+    state.prefetchPromise = null;
 
-    state.nextStartTime = 0;
-    state.schedulingChunkIdx = 0;
     state.chunks = [];
     state.cursor = 0;
   }
@@ -237,7 +273,10 @@ const TTS = (() => {
   return {
     get voices() { return loadVoices(); },
     setVoice(uri) { state.voiceURI = uri; },
-    setRate(r) { state.rate = Math.max(0.5, Math.min(2.5, Number(r) || 1.0)); },
+    setRate(r) {
+      state.rate = Math.max(0.5, Math.min(2.5, Number(r) || 1.0));
+      if (state.audioEl) state.audioEl.playbackRate = state.rate;
+    },
     setUseEcho(b) { state.useEcho = !!b; },
     isUsingEcho: () => state.useEcho,
     isPlaying: () => state.playing,
@@ -268,16 +307,12 @@ const TTS = (() => {
       state.abortController = new AbortController();
 
       if (state.engine === 'echo') {
-        const ctx = getAudioContext();
-        if (!ctx) {
-          state.engine = 'web';
-          return speakWebChunk(sessionId);
-        }
-        // Resume the context inside the user gesture (iOS "unlock"). Safe to
-        // call even if not suspended — it's a no-op then.
-        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-        state.nextStartTime = ctx.currentTime + 0.01;
-        scheduleNextChunk(sessionId);
+        // Touch the audio element from inside the user gesture so iOS
+        // associates it with the gesture and allows subsequent
+        // programmatic play() calls (chunk transitions, lock-screen
+        // play button) without refusing.
+        getAudioElement();
+        playEchoFromIndex(sessionId, 0);
       } else {
         speakWebChunk(sessionId);
       }
@@ -286,8 +321,8 @@ const TTS = (() => {
     pause() {
       if (!state.playing || state.paused) return;
       state.paused = true;
-      if (state.engine === 'echo' && state.audioCtx) {
-        state.audioCtx.suspend().catch(() => {});
+      if (state.engine === 'echo' && state.audioEl) {
+        try { state.audioEl.pause(); } catch (_) {}
       } else if (window.speechSynthesis) {
         try { speechSynthesis.pause(); } catch (_) {}
       }
@@ -295,8 +330,8 @@ const TTS = (() => {
     resume() {
       if (!state.paused) return;
       state.paused = false;
-      if (state.engine === 'echo' && state.audioCtx) {
-        state.audioCtx.resume().catch(() => {});
+      if (state.engine === 'echo' && state.audioEl) {
+        state.audioEl.play().catch(e => console.warn('[TTS] resume failed:', e.message));
       } else if (window.speechSynthesis) {
         try { speechSynthesis.resume(); } catch (_) {}
       }

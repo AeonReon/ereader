@@ -338,6 +338,9 @@
       st.lastOpened = Date.now();
       await DB.setState(st);
       app.currentState = st;
+      // Wire lock-screen / Bluetooth / CarPlay controls now that we know
+      // which book we're reading. Title shows on the lock screen.
+      setupMediaSession(book);
     } catch (e) {
       console.error('openBook failed:', e);
       // Show the real error so device-specific failures (e.g. EPUB lib not
@@ -395,6 +398,7 @@
     libraryView.classList.add('active');
     closeAllDrawers();
     setTtsUI(false);
+    clearMediaSession();
     renderLibrary();
   }
 
@@ -600,6 +604,30 @@
     return `${n.toFixed(n < 10 ? 1 : 0)} ${u[i]}`;
   }
 
+  // iOS marks high-quality voices in their .name (e.g. "Daniel (Enhanced)",
+  // "Siri Voice 2"). Score them so the picker can put the good ones up top
+  // and so a sensible default kicks in if the user hasn't picked one yet.
+  function voiceQualityScore(v) {
+    const name = (v.name || '').toLowerCase();
+    if (name.includes('siri')) return 4;
+    if (name.includes('premium')) return 3;
+    if (name.includes('enhanced')) return 2;
+    if (name.includes('neural') || name.includes('natural')) return 2;
+    return 0;
+  }
+
+  function pickBestEnglishVoice(voices) {
+    const en = voices.filter(v => /^en/i.test(v.lang));
+    if (!en.length) return null;
+    return en.slice().sort((a, b) => {
+      const sa = voiceQualityScore(a), sb = voiceQualityScore(b);
+      if (sa !== sb) return sb - sa;
+      // Same tier: prefer the OS default, then alphabetical.
+      if (a.default !== b.default) return a.default ? -1 : 1;
+      return (a.name || '').localeCompare(b.name || '');
+    })[0];
+  }
+
   async function populateVoices() {
     const voices = TTS.voices;
     voiceSelect.innerHTML = '';
@@ -608,6 +636,16 @@
       o.value = ''; o.textContent = '(system voices loading — pick after opening a book)';
       voiceSelect.appendChild(o);
       return;
+    }
+    // Auto-pick the best installed Apple voice if the user hasn't chosen
+    // one yet — saves them a trip to the dropdown to escape "Samantha".
+    if (!app.prefs.voiceURI) {
+      const best = pickBestEnglishVoice(voices);
+      if (best) {
+        app.prefs.voiceURI = best.voiceURI;
+        TTS.setVoice(best.voiceURI);
+        savePrefs();
+      }
     }
     const groups = {};
     for (const v of voices) {
@@ -622,10 +660,18 @@
     for (const lang of langs) {
       const g = document.createElement('optgroup');
       g.label = lang;
-      for (const v of groups[lang]) {
+      // Within each language, sort high-quality voices to the top so the
+      // user sees Enhanced / Siri / Premium first.
+      const sorted = groups[lang].slice().sort((a, b) => {
+        const sa = voiceQualityScore(a), sb = voiceQualityScore(b);
+        if (sa !== sb) return sb - sa;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+      for (const v of sorted) {
         const o = document.createElement('option');
         o.value = v.voiceURI;
-        o.textContent = v.name + (v.default ? ' — default' : '');
+        const tier = voiceQualityScore(v) >= 2 ? ' ✦' : '';
+        o.textContent = v.name + tier + (v.default ? ' — default' : '');
         if (app.prefs.voiceURI === v.voiceURI) o.selected = true;
         g.appendChild(o);
       }
@@ -819,6 +865,52 @@
 
   // (history reset is handled inline at openBook(), where Reader.load runs)
 
+  // ── Media Session API (lock-screen + Bluetooth + CarPlay controls) ────
+  // Lets iOS show "Reader · Book Title" on the lock screen with proper
+  // play/pause/skip buttons, and routes the headphone clicker / CarPlay
+  // play button back into the app instead of bouncing off Safari's default.
+  function setupMediaSession(book) {
+    if (!('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: (book && book.title) || 'Book',
+        artist: (book && book.author) || 'Reader',
+        album: 'eReader',
+        artwork: [
+          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+        ],
+      });
+      navigator.mediaSession.setActionHandler('play', () => {
+        if (app.ttsActive && TTS.isPaused()) TTS.resume();
+        else if (!app.ttsActive) ttsBtn && ttsBtn.click();
+        navigator.mediaSession.playbackState = 'playing';
+      });
+      navigator.mediaSession.setActionHandler('pause', () => {
+        if (TTS.isPlaying() && !TTS.isPaused()) TTS.pause();
+        navigator.mediaSession.playbackState = 'paused';
+      });
+      navigator.mediaSession.setActionHandler('previoustrack', () => navigatePage('prev'));
+      navigator.mediaSession.setActionHandler('nexttrack', () => navigatePage('next'));
+      // Don't register seek handlers — we don't have a per-second seek model
+      // (TTS chunks are sentence-sized). Without handlers iOS hides the
+      // seek bar, which is the right UX for a chapter-reading app.
+    } catch (e) {
+      console.warn('Media Session setup failed:', e && e.message);
+    }
+  }
+
+  function clearMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.playbackState = 'none';
+      ['play','pause','previoustrack','nexttrack'].forEach(action => {
+        try { navigator.mediaSession.setActionHandler(action, null); } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
   // ── Reading marker (right-margin "you are here" triangle) ─────────────
   // A rough position cue, not a per-word highlight. Kokoro doesn't return
   // word-level timing data, so per-word would need a different engine.
@@ -895,6 +987,10 @@
       ttsBtn.setAttribute('aria-label', on ? 'Stop reading' : 'Read aloud');
     }
     if (!on) hideReadingMarker();
+    // Reflect state on the lock screen so the play/pause icon matches reality.
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = on ? 'playing' : 'paused';
+    }
   }
 
   // Toggle chrome on tap middle (emitted by EPUB engine) — kept simple: always visible
