@@ -398,12 +398,84 @@ input, select { font: inherit; color: inherit; }
 }
 .reading-marker.hidden { display: none; }
 
-/* Voice-engine quick toggle in the top bar. Shows "E" for Echo (neural,
-   needs internet) or "A" for Apple voice (offline). Tap to switch — saves
-   a trip into the settings drawer when you're about to lose connection. */
+/* Voice-engine quick toggle in the top bar. Three states:
+   E = Echo (Kokoro on Mac mini, needs internet, gold)
+   M = My voice (F5-TTS clone, needs internet, green)
+   A = Apple device voice (offline, blue)
+   Tap to cycle E → M → A → E. */
 .voice-toggle { font-weight: 700; font-size: 13px; }
 .voice-toggle.is-echo  { color: #d4a017; }
+.voice-toggle.is-clone { color: #4caf50; }
 .voice-toggle.is-apple { color: #6ec1ff; }
+
+/* Voices section in settings drawer */
+.voices-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.voice-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px;
+  border: 1px solid var(--border, rgba(212,175,55,0.15));
+  border-radius: 8px;
+  font-size: 13px;
+}
+.voice-row.active { border-color: #4caf50; box-shadow: 0 0 0 2px rgba(76,175,80,0.18); }
+.voice-row .voice-name { font-weight: 600; }
+.voice-row .voice-meta { font-size: 11px; opacity: 0.6; margin-top: 2px; }
+.voice-row .voice-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.voice-row .btn-small { padding: 4px 10px; font-size: 12px; }
+.voice-row .btn-danger { color: #d44; border-color: rgba(220,68,68,0.4); }
+
+/* Recording dialog */
+.record-dialog-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200;
+  display: flex; align-items: center; justify-content: center;
+}
+.record-dialog {
+  background: var(--bg, #1a2438);
+  color: var(--fg, #e8ecf4);
+  border-radius: 14px;
+  padding: 22px;
+  max-width: 420px;
+  width: 92%;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.record-dialog h3 { margin: 0 0 12px; font-size: 18px; }
+.record-script {
+  background: rgba(212,175,55,0.08);
+  border-left: 3px solid #d4a017;
+  padding: 12px 14px;
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 12px 0;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.record-controls { display: flex; gap: 10px; align-items: center; margin: 14px 0; }
+.record-timer { font-variant-numeric: tabular-nums; font-size: 16px; font-weight: 600; }
+.record-name-input {
+  width: 100%; padding: 8px 10px; font-size: 14px;
+  border: 1px solid rgba(212,175,55,0.3); border-radius: 6px;
+  background: rgba(255,255,255,0.05); color: inherit;
+  margin-top: 8px;
+}
+.record-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+.btn-primary {
+  padding: 8px 16px; font-size: 14px; font-weight: 600;
+  border: 1px solid #d4a017; border-radius: 6px;
+  background: #d4a017; color: #1a1a1a; cursor: pointer;
+}
+.btn-secondary {
+  padding: 8px 16px; font-size: 14px;
+  border: 1px solid var(--border-strong, rgba(212,175,55,0.3)); border-radius: 6px;
+  background: transparent; color: inherit; cursor: pointer;
+}
+.btn-record {
+  padding: 8px 16px; font-size: 14px; font-weight: 600;
+  border: 1px solid #d44; border-radius: 999px;
+  background: rgba(220,68,68,0.15); color: #ff8a8a; cursor: pointer;
+}
+.btn-record.recording { background: #d44; color: #fff; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.7; } }
 
 /* Voice-picker row with the Test button beside the dropdown. */
 .voice-picker-row { display: flex; gap: 8px; align-items: center; }

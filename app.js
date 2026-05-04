@@ -27,7 +27,6 @@
   const tocList = el('toc-list');
   const bookmarksList = el('bookmarks-list');
   const voiceSelect = el('voice-select');
-  const useEchoToggle = el('use-echo');
   const rateEl = el('rate');
   const rateLabel = el('rate-label');
   const storageInfo = el('storage-info');
@@ -45,8 +44,10 @@
       spacing: 1.6,
       rate: 1.0,
       voiceURI: null,
-      useEcho: true,
+      engineMode: 'echo',     // 'echo' | 'clone' | 'web'
+      cloneRefId: null,        // id of the custom voice to use in 'clone' mode
     },
+    cloneRefs: [],             // cached list from /api/refs (filled on settings open)
   };
 
   // -------------------- Toast --------------------
@@ -68,7 +69,13 @@
     Reader.setSpacing(app.prefs.spacing);
     TTS.setRate(app.prefs.rate);
     if (app.prefs.voiceURI) TTS.setVoice(app.prefs.voiceURI);
-    TTS.setUseEcho(app.prefs.useEcho !== false);
+    // Engine mode: prefer the new key, migrate from old useEcho if present.
+    const mode = (app.prefs.engineMode === 'clone' || app.prefs.engineMode === 'web' || app.prefs.engineMode === 'echo')
+      ? app.prefs.engineMode
+      : (app.prefs.useEcho === false ? 'web' : 'echo');
+    app.prefs.engineMode = mode;
+    TTS.setEngineMode(mode);
+    if (app.prefs.cloneRefId) TTS.setCloneRefId(app.prefs.cloneRefId);
     // Sync UI
     syncPrefsUI();
   }
@@ -593,6 +600,7 @@
     openDrawer(settingsDrawer);
     await populateVoices();
     updateActiveVoiceLabel();
+    loadCustomVoices();   // fire-and-forget — fills the My Voices list
     const u = await DB.usage();
     if (u.quota) storageInfo.textContent = `${formatBytes(u.usage)} used of ${formatBytes(u.quota)} available`;
     else storageInfo.textContent = `${formatBytes(u.usage)} used`;
@@ -783,52 +791,288 @@
     savePrefs();
     updateActiveVoiceLabel();
   });
-  // Sync the Echo toggle, the top-bar quick-button, and the underlying
-  // TTS engine — flipping any one updates the others. The quick-button
-  // exists so you can pre-empt going offline ("I'm about to lose signal,
-  // switch to Apple voice now") without diving into settings.
+  // Three-way voice engine: 'echo' (Kokoro online) | 'clone' (custom voice
+  // online) | 'web' (Apple device voice offline). The quick toggle in the
+  // reader top bar cycles through them. The full picker (incl. recording
+  // a new clone voice) lives in the Settings drawer.
   const voiceToggleBtn = el('voice-toggle-btn');
   const voiceToggleLabel = el('voice-toggle-label');
+  const engineModeSelect = el('engine-mode-select');
+  const engineModeHint = el('engine-mode-hint');
+  const voicesListEl = el('voices-list');
+  const recordVoiceBtn = el('record-voice-btn');
+
+  function currentEngineMode() {
+    const m = app.prefs.engineMode;
+    if (m === 'echo' || m === 'clone' || m === 'web') return m;
+    // Migrate old prefs: useEcho=true → echo, false → web.
+    return app.prefs.useEcho === false ? 'web' : 'echo';
+  }
 
   function reflectEngineMode() {
-    const useEcho = app.prefs.useEcho !== false;
-    if (useEchoToggle) useEchoToggle.checked = useEcho;
+    const mode = currentEngineMode();
     if (voiceToggleBtn && voiceToggleLabel) {
-      voiceToggleLabel.textContent = useEcho ? 'E' : 'A';
-      voiceToggleBtn.classList.toggle('is-echo', useEcho);
-      voiceToggleBtn.classList.toggle('is-apple', !useEcho);
-      voiceToggleBtn.setAttribute('aria-label',
-        useEcho ? 'Voice: Echo (tap to switch to Apple voice)' : 'Voice: Apple (tap to switch to Echo)');
+      voiceToggleLabel.textContent = mode === 'echo' ? 'E' : mode === 'clone' ? 'M' : 'A';
+      voiceToggleBtn.classList.toggle('is-echo', mode === 'echo');
+      voiceToggleBtn.classList.toggle('is-clone', mode === 'clone');
+      voiceToggleBtn.classList.toggle('is-apple', mode === 'web');
+      const label = mode === 'echo' ? 'Voice: Echo (Mac mini)'
+        : mode === 'clone' ? 'Voice: My custom voice'
+        : 'Voice: Apple device voice';
+      voiceToggleBtn.setAttribute('aria-label', label + ' — tap to cycle');
       voiceToggleBtn.title = voiceToggleBtn.getAttribute('aria-label');
     }
-  }
-
-  function setEngineMode(useEcho) {
-    app.prefs.useEcho = !!useEcho;
-    TTS.setUseEcho(app.prefs.useEcho);
-    reflectEngineMode();
-    // If currently playing, stop so the next play uses the new engine.
-    if (TTS.isPlaying()) { TTS.stop(); setTtsUI(false); }
-    savePrefs();
-    if (useEcho) {
-      showToast('🌐 Echo voice — needs internet');
-    } else {
-      // Tell the user which Apple voice they're getting AND how to change it,
-      // since the picker is buried in Settings.
-      const voices = TTS.voices;
-      const v = voices.find(x => x.voiceURI === app.prefs.voiceURI);
-      const name = v ? v.name : (voices.length ? '(default)' : 'loading…');
-      showToast(`📱 Apple voice: ${name} — long-press the A button to change`);
+    if (engineModeSelect) engineModeSelect.value = mode;
+    if (engineModeHint) {
+      engineModeHint.textContent = mode === 'echo'
+        ? 'Echo (Kokoro on Mac mini) sounds best. Needs internet.'
+        : mode === 'clone'
+          ? `Reading in your custom voice. Needs internet${app.prefs.cloneRefId ? '.' : ' — record one below first.'}`
+          : 'Device voice — works offline. Quality depends on which Enhanced voice you installed.';
     }
   }
 
-  if (useEchoToggle) {
-    useEchoToggle.addEventListener('change', () => setEngineMode(useEchoToggle.checked));
+  function setEngineMode(mode) {
+    if (!['echo', 'clone', 'web'].includes(mode)) return;
+    app.prefs.engineMode = mode;
+    TTS.setEngineMode(mode);
+    reflectEngineMode();
+    if (TTS.isPlaying()) { TTS.stop(); setTtsUI(false); }
+    savePrefs();
+    if (mode === 'echo') showToast('🌐 Echo voice — needs internet');
+    else if (mode === 'clone') {
+      if (!app.prefs.cloneRefId) {
+        showToast('👤 My voice mode — record a voice in Settings first');
+      } else {
+        const v = (app.cloneRefs || []).find(r => r.id === app.prefs.cloneRefId);
+        showToast(`👤 My voice: ${v ? v.name : 'custom'}`);
+      }
+    } else {
+      const voices = TTS.voices;
+      const v = voices.find(x => x.voiceURI === app.prefs.voiceURI);
+      showToast(`📱 Apple voice: ${v ? v.name : '(default)'}`);
+    }
   }
+
   if (voiceToggleBtn) {
-    voiceToggleBtn.addEventListener('click', () => setEngineMode(app.prefs.useEcho === false));
+    voiceToggleBtn.addEventListener('click', () => {
+      const m = currentEngineMode();
+      const next = m === 'echo' ? 'clone' : m === 'clone' ? 'web' : 'echo';
+      setEngineMode(next);
+    });
   }
+  if (engineModeSelect) {
+    engineModeSelect.addEventListener('change', () => setEngineMode(engineModeSelect.value));
+  }
+  TTS.setEngineMode(currentEngineMode());
+  if (app.prefs.cloneRefId) TTS.setCloneRefId(app.prefs.cloneRefId);
   reflectEngineMode();
+
+  // ── Custom voices: list, record, delete ───────────────────────────────
+  const VOICE_AGENT_BASE = 'https://tts.aiprofits.cc';
+
+  async function loadCustomVoices() {
+    if (!voicesListEl) return;
+    try {
+      const r = await fetch(VOICE_AGENT_BASE + '/api/refs', { cache: 'no-store' });
+      const d = await r.json();
+      app.cloneRefs = d.refs || [];
+    } catch (e) {
+      voicesListEl.innerHTML = '<p class="hint">Could not reach voice server. Check Mac mini is on.</p>';
+      return;
+    }
+    renderCustomVoices();
+  }
+
+  function renderCustomVoices() {
+    if (!voicesListEl) return;
+    const refs = app.cloneRefs || [];
+    if (!refs.length) {
+      voicesListEl.innerHTML = '<p class="hint">No custom voices yet — record one to use it.</p>';
+      return;
+    }
+    voicesListEl.innerHTML = '';
+    for (const r of refs) {
+      const row = document.createElement('div');
+      row.className = 'voice-row' + (r.id === app.prefs.cloneRefId ? ' active' : '');
+      const left = document.createElement('div');
+      const name = document.createElement('div');
+      name.className = 'voice-name';
+      name.textContent = r.name || '(unnamed)';
+      const meta = document.createElement('div');
+      meta.className = 'voice-meta';
+      const date = r.created_at ? new Date(r.created_at * 1000).toLocaleDateString() : '';
+      meta.textContent = `${date} · ${r.id}`;
+      left.appendChild(name); left.appendChild(meta);
+      const actions = document.createElement('div');
+      actions.className = 'voice-actions';
+      const useBtn = document.createElement('button');
+      useBtn.type = 'button';
+      useBtn.className = 'btn-small';
+      useBtn.textContent = r.id === app.prefs.cloneRefId ? '✓ Active' : 'Use';
+      useBtn.addEventListener('click', () => {
+        app.prefs.cloneRefId = r.id;
+        TTS.setCloneRefId(r.id);
+        savePrefs();
+        renderCustomVoices();
+        setEngineMode('clone');
+      });
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn-small btn-danger';
+      delBtn.textContent = 'Delete';
+      delBtn.addEventListener('click', async () => {
+        if (!confirm(`Delete "${r.name}"?`)) return;
+        try {
+          await fetch(VOICE_AGENT_BASE + '/api/refs/' + encodeURIComponent(r.id), { method: 'DELETE' });
+        } catch (_) {}
+        if (app.prefs.cloneRefId === r.id) {
+          app.prefs.cloneRefId = null;
+          TTS.setCloneRefId(null);
+          savePrefs();
+        }
+        await loadCustomVoices();
+      });
+      actions.appendChild(useBtn);
+      actions.appendChild(delBtn);
+      row.appendChild(left);
+      row.appendChild(actions);
+      voicesListEl.appendChild(row);
+    }
+  }
+
+  // ── Record-voice dialog ───────────────────────────────────────────────
+  const RECORD_SCRIPT = (
+    'The morning light came slow over the hills, soft and grey at first, '
+    + 'then golden as the sun lifted clear of the trees. The air smelled of '
+    + 'wet earth and woodsmoke from a fire someone had lit before dawn.'
+  );
+
+  if (recordVoiceBtn) {
+    recordVoiceBtn.addEventListener('click', openRecordDialog);
+  }
+
+  function openRecordDialog() {
+    // Clean up any prior dialog
+    document.querySelectorAll('.record-dialog-backdrop').forEach(n => n.remove());
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'record-dialog-backdrop';
+    backdrop.innerHTML = `
+      <div class="record-dialog">
+        <h3>Record your voice</h3>
+        <p class="hint">Read the paragraph below clearly at a normal pace. About 10 seconds. The reader will use this voice for any book afterwards.</p>
+        <div class="record-script" id="rec-script">${RECORD_SCRIPT}</div>
+        <div class="record-controls">
+          <button id="rec-toggle" class="btn-record" type="button">● Start recording</button>
+          <span id="rec-timer" class="record-timer">0.0s</span>
+          <audio id="rec-preview" controls style="display:none; flex:1; min-width:0;"></audio>
+        </div>
+        <input id="rec-name" class="record-name-input" placeholder="Name this voice (e.g. Vincent's voice)" maxlength="60">
+        <p class="hint" id="rec-status">Tap "Start recording" to begin.</p>
+        <div class="record-actions">
+          <button id="rec-cancel" class="btn-secondary" type="button">Cancel</button>
+          <button id="rec-save" class="btn-primary" type="button" disabled>Save voice</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    const recToggle = document.getElementById('rec-toggle');
+    const recTimer = document.getElementById('rec-timer');
+    const recPreview = document.getElementById('rec-preview');
+    const recName = document.getElementById('rec-name');
+    const recStatus = document.getElementById('rec-status');
+    const recSave = document.getElementById('rec-save');
+    const recCancel = document.getElementById('rec-cancel');
+
+    let mediaRecorder = null;
+    let audioStream = null;
+    let recordedBlob = null;
+    let startedAt = 0;
+    let timerId = 0;
+
+    function close() {
+      try { if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop(); } catch (_) {}
+      try { if (audioStream) audioStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+      clearInterval(timerId);
+      backdrop.remove();
+    }
+    recCancel.addEventListener('click', close);
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+
+    recToggle.addEventListener('click', async () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        return;
+      }
+      try {
+        audioStream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, sampleRate: 24000 },
+          video: false,
+        });
+      } catch (e) {
+        recStatus.textContent = `Microphone unavailable: ${e.name || ''} ${e.message || ''}`;
+        return;
+      }
+      const chunks = [];
+      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
+      mediaRecorder = new MediaRecorder(audioStream, mime ? { mimeType: mime } : {});
+      mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      mediaRecorder.onstop = () => {
+        clearInterval(timerId);
+        recToggle.classList.remove('recording');
+        recToggle.textContent = '↻ Re-record';
+        try { audioStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+        recordedBlob = new Blob(chunks, { type: mime || 'audio/webm' });
+        recPreview.src = URL.createObjectURL(recordedBlob);
+        recPreview.style.display = 'block';
+        recStatus.textContent = 'Listen back. If it sounds clear, name your voice and save.';
+        recSave.disabled = false;
+      };
+      mediaRecorder.start();
+      startedAt = Date.now();
+      recToggle.classList.add('recording');
+      recToggle.textContent = '■ Stop';
+      recStatus.textContent = 'Recording — read the paragraph clearly.';
+      recSave.disabled = true;
+      timerId = setInterval(() => {
+        const t = (Date.now() - startedAt) / 1000;
+        recTimer.textContent = t.toFixed(1) + 's';
+        // Auto-stop at 12 sec — F5 wants ≤10 s, server will trim, but a hard
+        // cap here avoids accidentally uploading 5 min of background noise.
+        if (t >= 12 && mediaRecorder.state === 'recording') mediaRecorder.stop();
+      }, 100);
+    });
+
+    recSave.addEventListener('click', async () => {
+      if (!recordedBlob) return;
+      const name = (recName.value || '').trim() || 'My voice';
+      recSave.disabled = true;
+      recStatus.textContent = 'Uploading…';
+      const fd = new FormData();
+      fd.append('audio', recordedBlob, 'ref.webm');
+      fd.append('name', name);
+      fd.append('transcript', RECORD_SCRIPT);
+      try {
+        const r = await fetch(VOICE_AGENT_BASE + '/api/upload-ref', { method: 'POST', body: fd });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'upload failed');
+        app.prefs.cloneRefId = d.id;
+        TTS.setCloneRefId(d.id);
+        savePrefs();
+        await loadCustomVoices();
+        close();
+        showToast(`👤 "${d.name}" saved — voice is now active`);
+        setEngineMode('clone');
+      } catch (e) {
+        recStatus.textContent = `Upload failed: ${e.message || e}`;
+        recSave.disabled = false;
+      }
+    });
+  }
   if (window.speechSynthesis) {
     speechSynthesis.addEventListener('voiceschanged', () => {
       if (settingsDrawer.classList.contains('open')) populateVoices();

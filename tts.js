@@ -15,13 +15,20 @@
 // chunk on the audio clock, so there's no gap and no overlap — ever.
 const TTS = (() => {
   const ECHO_ENDPOINT = 'https://tts.aiprofits.cc/api/tts';
+  const CLONE_ENDPOINT = 'https://tts.aiprofits.cc/api/clone-tts';
   const ECHO_VOICE = 'am_echo';
   const CHUNK_MAX = 280;
 
   const state = {
     rate: 1.0,
     voiceURI: null,
-    useEcho: true,
+    // engineMode is the user's preference; engine is what's actually
+    // running this session (may flip to 'web' if echo/clone fail).
+    //   'echo'  — Kokoro on Mac mini (online, best quality)
+    //   'clone' — F5-TTS on Mac mini in user's own voice (online, personal)
+    //   'web'   — iOS / Android device speech (offline fallback)
+    engineMode: 'echo',
+    cloneRefId: null,
     engine: 'echo',
     playing: false,
     paused: false,
@@ -99,13 +106,19 @@ const TTS = (() => {
   }
 
   async function fetchEchoBytes(text, signal) {
-    const r = await fetch(ECHO_ENDPOINT, {
+    // Pick endpoint + body shape based on engine. Both return audio/wav.
+    const useClone = state.engine === 'clone' && state.cloneRefId;
+    const url = useClone ? CLONE_ENDPOINT : ECHO_ENDPOINT;
+    const body = useClone
+      ? { text, ref_id: state.cloneRefId, speed: state.rate }
+      : { text, voice: ECHO_VOICE, speed: state.rate };
+    const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voice: ECHO_VOICE, speed: state.rate }),
+      body: JSON.stringify(body),
       signal,
     });
-    if (!r.ok) throw new Error('echo http ' + r.status);
+    if (!r.ok) throw new Error((useClone ? 'clone' : 'echo') + ' http ' + r.status);
     return await r.arrayBuffer();
   }
 
@@ -298,8 +311,17 @@ const TTS = (() => {
       state.rate = Math.max(0.5, Math.min(2.5, Number(r) || 1.0));
       if (state.audioEl) state.audioEl.playbackRate = state.rate;
     },
-    setUseEcho(b) { state.useEcho = !!b; },
-    isUsingEcho: () => state.useEcho,
+    // Three-way engine selection: 'echo' | 'clone' | 'web'.
+    setEngineMode(mode) {
+      if (!['echo', 'clone', 'web'].includes(mode)) return;
+      state.engineMode = mode;
+    },
+    getEngineMode: () => state.engineMode,
+    setCloneRefId(id) { state.cloneRefId = id || null; },
+    getCloneRefId: () => state.cloneRefId,
+    // Back-compat shim: some older callers still flip useEcho.
+    setUseEcho(b) { state.engineMode = b ? 'echo' : 'web'; },
+    isUsingEcho: () => state.engineMode === 'echo',
     isPlaying: () => state.playing,
     isPaused: () => state.paused,
     isUsingFallback: () => state.engine === 'web' && state.useEcho,
@@ -321,7 +343,11 @@ const TTS = (() => {
       state.cursor = 0;
       state.playing = true;
       state.paused = false;
-      state.engine = state.useEcho ? 'echo' : 'web';
+      // The engine for this play() call: prefer the user's mode, but
+      // fall through to 'web' if 'clone' was chosen with no ref selected.
+      state.engine = state.engineMode === 'clone' && state.cloneRefId
+        ? 'clone'
+        : (state.engineMode === 'echo' ? 'echo' : 'web');
       state.onChunkStart = hooks.onChunkStart || null;
       state.onChunkEnd = hooks.onChunkEnd || null;
       state.onStop = hooks.onStop || null;
@@ -335,7 +361,7 @@ const TTS = (() => {
       getAudioElement();
       primeSpeechSynthesis();
 
-      if (state.engine === 'echo') {
+      if (state.engine === 'echo' || state.engine === 'clone') {
         // Fast-path: if the browser knows we're offline, don't bother
         // with the network fetch — it'd fail anyway, and the failure
         // takes long enough that the user assumes "nothing happens."

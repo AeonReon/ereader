@@ -174,11 +174,23 @@
     </button>
   </div>
   <div class="settings-group">
-    <label class="toggle-row">
-      <span>Echo voice <span class="hint inline">— neural, sounds best (needs internet)</span></span>
-      <input id="use-echo" type="checkbox" checked>
-    </label>
-    <label class="device-voice-label">Device voice (used when Echo is off or offline)</label>
+    <label>Voice engine</label>
+    <select id="engine-mode-select">
+      <option value="echo">🌐 Echo — Kokoro (Mac mini, needs internet)</option>
+      <option value="clone">👤 My voice — your custom clone (Mac mini, needs internet)</option>
+      <option value="web">📱 Apple voice — device voice (works offline)</option>
+    </select>
+    <p class="hint" id="engine-mode-hint">Use Echo when online for best quality.</p>
+  </div>
+  <div class="settings-group">
+    <label>My voices</label>
+    <div class="voices-list" id="voices-list">
+      <p class="hint">No custom voices yet — record one to use it.</p>
+    </div>
+    <button id="record-voice-btn" type="button" class="btn-small">+ Record new voice</button>
+  </div>
+  <div class="settings-group">
+    <label class="device-voice-label">Apple voice (used in offline mode)</label>
     <div class="voice-picker-row">
       <select id="voice-select"></select>
       <button id="voice-test-btn" type="button" class="btn-small" aria-label="Test this voice">▶ Test</button>
