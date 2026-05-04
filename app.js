@@ -333,6 +333,7 @@
       // Reset header / footer skip history — different book = different chrome.
       app.recentFirstLines = [];
       app.recentLastLines = [];
+      app.fallbackToastShown = false;
       await Reader.load(book);
       const st = await DB.getState(id);
       st.lastOpened = Date.now();
@@ -865,6 +866,17 @@
 
   // (history reset is handled inline at openBook(), where Reader.load runs)
 
+  // Reset the Echo-down toast flag when the network comes back so the
+  // user gets a fresh notification on the next outage. Also good signal
+  // that they can try Echo again.
+  window.addEventListener('online', () => {
+    app.fallbackToastShown = false;
+    showToast('📶 Back online — Echo voice will resume on the next page');
+  });
+  window.addEventListener('offline', () => {
+    if (app.ttsActive) showToast('📡 Offline — switching to device voice');
+  });
+
   // ── Media Session API (lock-screen + Bluetooth + CarPlay controls) ────
   // Lets iOS show "Reader · Book Title" on the lock screen with proper
   // play/pause/skip buttons, and routes the headphone clicker / CarPlay
@@ -944,6 +956,16 @@
     showReadingMarker(0, totalChunks);
     TTS.play(text, {
       onChunkStart: (i) => showReadingMarker(i, totalChunks),
+      // Toast once per session when Echo can't be reached and we drop to
+      // the device voice — otherwise the user hears the voice change
+      // and assumes something's broken instead of "I'm offline."
+      onFallback: (reason) => {
+        if (app.fallbackToastShown) return;
+        app.fallbackToastShown = true;
+        showToast(reason === 'offline'
+          ? '📡 Offline — using device voice'
+          : '📡 Echo unreachable — using device voice');
+      },
       onStop: async () => {
         // User pressed Stop, or the book ran out — bail without advancing.
         if (!app.ttsActive) {

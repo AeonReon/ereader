@@ -109,6 +109,24 @@ const TTS = (() => {
     return await r.arrayBuffer();
   }
 
+  // iOS gates speechSynthesis behind a user gesture: the FIRST call to
+  // .speak() must happen inside a tap/click handler, otherwise it's
+  // silently ignored. When Echo fails mid-async-fetch and we then try to
+  // fall back to speech, we're outside the gesture and the speech goes
+  // nowhere. Solution: speak a silent utterance inside the gesture so
+  // iOS marks the session as "allowed to speak" for the rest of the page.
+  let _speechPrimed = false;
+  function primeSpeechSynthesis() {
+    if (_speechPrimed) return;
+    if (!window.speechSynthesis) return;
+    try {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      speechSynthesis.speak(u);
+      _speechPrimed = true;
+    } catch (_) { /* ignore */ }
+  }
+
   // Fetch one chunk, return as a blob URL ready to feed to <audio>.
   // Tracks the blob URL so hardReset() can revoke it on stop.
   async function fetchChunkAsBlobUrl(text, signal) {
@@ -142,6 +160,9 @@ const TTS = (() => {
       console.warn('[TTS] Echo unreachable, falling back to device voice:', e.message);
       state.engine = 'web';
       state.cursor = idx;
+      // Tell the app so it can toast — otherwise the user just hears a
+      // sudden voice change with no explanation.
+      if (state.onFallback) state.onFallback('echo-unreachable', e);
       return speakWebChunk(sessionId);
     }
 
@@ -304,14 +325,26 @@ const TTS = (() => {
       state.onChunkStart = hooks.onChunkStart || null;
       state.onChunkEnd = hooks.onChunkEnd || null;
       state.onStop = hooks.onStop || null;
+      state.onFallback = hooks.onFallback || null;
       state.abortController = new AbortController();
 
+      // Prime BOTH playback paths inside the user gesture so iOS lets
+      // either fire later. Audio element gets touched (creating it
+      // associates it with the gesture); speech synthesis gets a silent
+      // utterance so we can fall back to it from an async fetch failure.
+      getAudioElement();
+      primeSpeechSynthesis();
+
       if (state.engine === 'echo') {
-        // Touch the audio element from inside the user gesture so iOS
-        // associates it with the gesture and allows subsequent
-        // programmatic play() calls (chunk transitions, lock-screen
-        // play button) without refusing.
-        getAudioElement();
+        // Fast-path: if the browser knows we're offline, don't bother
+        // with the network fetch — it'd fail anyway, and the failure
+        // takes long enough that the user assumes "nothing happens."
+        // Notify via hooks so the app can toast "using device voice."
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          state.engine = 'web';
+          if (hooks.onFallback) hooks.onFallback('offline');
+          return speakWebChunk(sessionId);
+        }
         playEchoFromIndex(sessionId, 0);
       } else {
         speakWebChunk(sessionId);
