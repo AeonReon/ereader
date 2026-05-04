@@ -606,20 +606,43 @@
     return `${n.toFixed(n < 10 ? 1 : 0)} ${u[i]}`;
   }
 
-  // iOS marks high-quality voices in their .name (e.g. "Daniel (Enhanced)",
-  // "Siri Voice 2"). Score them so the picker can put the good ones up top
-  // and so a sensible default kicks in if the user hasn't picked one yet.
+  // iOS exposes voice tier in the voiceURI ("com.apple.voice.enhanced.en-US.Daniel"
+  // vs ".compact." vs ".premium.") rather than in the .name field, so we have
+  // to look at both. Score is high → low: Siri / Premium / Enhanced / Neural
+  // / Natural / Compact / Novelty.
   function voiceQualityScore(v) {
     const name = (v.name || '').toLowerCase();
-    if (name.includes('siri')) return 4;
-    if (name.includes('premium')) return 3;
-    if (name.includes('enhanced')) return 2;
-    if (name.includes('neural') || name.includes('natural')) return 2;
+    const uri = (v.voiceURI || '').toLowerCase();
+    if (uri.includes('premium') || name.includes('premium')) return 4;
+    if (uri.includes('siri') || name.includes('siri')) return 4;
+    if (uri.includes('enhanced') || name.includes('enhanced')) return 3;
+    if (uri.includes('neural') || uri.includes('natural') ||
+        name.includes('neural') || name.includes('natural')) return 3;
+    if (uri.includes('compact') || name.includes('compact')) return 1;
     return 0;
   }
 
+  // iOS ships a long list of "novelty" voices (Bahh, Bells, Bubbles, Pipe
+  // Organ, Zarvox, Trinoids, etc) plus foreign-language voices. None of
+  // these belong in a reading-aloud picker. Match by name so they're
+  // hidden even when the URI doesn't have a quality tier.
+  const NOVELTY_VOICES = /\b(albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|fred|good news|hysterical|jester|junior|kathy|organ|pipe|princess|ralph|trinoids|whisper|zarvox|wobble|grandma|grandpa|rocko|shelley|sandy|flo|eddy|reed)\b/i;
+  function isNoveltyVoice(v) {
+    return NOVELTY_VOICES.test(v.name || '');
+  }
+
+  // The voice should be considered "good enough to show by default" if it
+  // is English, not novelty, and either has a quality tier (Enhanced /
+  // Premium / Siri / Neural / Natural) OR is the OS default. We hide
+  // compact-only entries because that's the quality the user finds robotic.
+  function isPickableVoice(v) {
+    if (!/^en/i.test(v.lang)) return false;
+    if (isNoveltyVoice(v)) return false;
+    return voiceQualityScore(v) >= 3 || (v.default && voiceQualityScore(v) >= 1);
+  }
+
   function pickBestEnglishVoice(voices) {
-    const en = voices.filter(v => /^en/i.test(v.lang));
+    const en = voices.filter(v => /^en/i.test(v.lang) && !isNoveltyVoice(v));
     if (!en.length) return null;
     return en.slice().sort((a, b) => {
       const sa = voiceQualityScore(a), sb = voiceQualityScore(b);
@@ -649,19 +672,18 @@
         savePrefs();
       }
     }
-    // By default, only show high-quality voices (Siri / Premium / Enhanced /
-    // Neural / Natural) — these are the ones the user actually wants. Most
-    // installed voices are old "compact" engines and don't sound great. The
-    // "Show all" toggle restores the long list for anyone who wants it.
+    // By default, only show English non-novelty Enhanced/Premium/Siri voices.
+    // The "Show all" toggle restores the full list (including compact, foreign,
+    // and novelty voices) for anyone who specifically wants one of them.
     const showAll = !!app.prefs.showAllVoices;
-    let voices = showAll ? allVoices : allVoices.filter(v => voiceQualityScore(v) >= 2);
-    // If filtering produced nothing (user has no high-quality voices yet),
-    // fall back to the full list and tell them how to fix it.
+    let voices = showAll ? allVoices : allVoices.filter(isPickableVoice);
+    // If filtering produced nothing, fall back to all English voices (still
+    // hide novelty + foreign) and tell the user how to install Enhanced.
     if (!voices.length) {
-      voices = allVoices;
+      voices = allVoices.filter(v => /^en/i.test(v.lang) && !isNoveltyVoice(v));
       const note = document.createElement('option');
       note.value = ''; note.disabled = true;
-      note.textContent = '— no Enhanced voices installed (iOS Settings → Spoken Content → Voices) —';
+      note.textContent = '— No Enhanced voices found. iOS Settings → Spoken Content → Voices → English → tap a voice → Enhanced —';
       voiceSelect.appendChild(note);
     }
     const groups = {};
@@ -788,7 +810,16 @@
     // If currently playing, stop so the next play uses the new engine.
     if (TTS.isPlaying()) { TTS.stop(); setTtsUI(false); }
     savePrefs();
-    showToast(useEcho ? '🌐 Echo voice — needs internet' : '📱 Apple voice — works offline');
+    if (useEcho) {
+      showToast('🌐 Echo voice — needs internet');
+    } else {
+      // Tell the user which Apple voice they're getting AND how to change it,
+      // since the picker is buried in Settings.
+      const voices = TTS.voices;
+      const v = voices.find(x => x.voiceURI === app.prefs.voiceURI);
+      const name = v ? v.name : (voices.length ? '(default)' : 'loading…');
+      showToast(`📱 Apple voice: ${name} — long-press the A button to change`);
+    }
   }
 
   if (useEchoToggle) {
