@@ -26,7 +26,6 @@
   const readerSettingsDrawer = el('reader-settings-drawer');
   const tocList = el('toc-list');
   const bookmarksList = el('bookmarks-list');
-  const voiceSelect = el('voice-select');
   const rateEl = el('rate');
   const rateLabel = el('rate-label');
   const storageInfo = el('storage-info');
@@ -596,7 +595,7 @@
   // -------------------- Settings --------------------
   settingsBtn.addEventListener('click', async () => {
     openDrawer(settingsDrawer);
-    await populateVoices();
+    applyBestVoice();
     updateActiveVoiceLabel();
     const u = await DB.usage();
     if (u.quota) storageInfo.textContent = `${formatBytes(u.usage)} used of ${formatBytes(u.quota)} available`;
@@ -646,118 +645,71 @@
     return voiceQualityScore(v) >= 3 || (v.default && voiceQualityScore(v) >= 1);
   }
 
+  // Single-voice strategy: prefer Daniel (Enhanced) for offline reading.
+  // The user has decided every other web-exposed Apple voice sounds bad,
+  // so the picker is gone — we just lock in Daniel-or-best-Enhanced and
+  // show its name as a label. If Daniel isn't installed, fall back to
+  // any other Enhanced English voice; if nothing Enhanced is installed,
+  // surface a hint pointing the user at iOS Settings to download one.
   function pickBestEnglishVoice(voices) {
     const en = voices.filter(v => /^en/i.test(v.lang) && !isNoveltyVoice(v));
     if (!en.length) return null;
+    // Strong preference: Daniel Enhanced (matches "Daniel" in name AND
+    // any quality tier in URI, but settle for any Daniel if needed).
+    const daniel = en.find(v => /\bdaniel\b/i.test(v.name) && voiceQualityScore(v) >= 3)
+                || en.find(v => /\bdaniel\b/i.test(v.name));
+    if (daniel) return daniel;
     return en.slice().sort((a, b) => {
       const sa = voiceQualityScore(a), sb = voiceQualityScore(b);
       if (sa !== sb) return sb - sa;
-      // Same tier: prefer the OS default, then alphabetical.
       if (a.default !== b.default) return a.default ? -1 : 1;
       return (a.name || '').localeCompare(b.name || '');
     })[0];
   }
 
-  async function populateVoices() {
-    const allVoices = TTS.voices;
-    voiceSelect.innerHTML = '';
-    if (!allVoices.length) {
-      const o = document.createElement('option');
-      o.value = ''; o.textContent = '(system voices loading — pick after opening a book)';
-      voiceSelect.appendChild(o);
-      return;
-    }
-    // Auto-pick the best installed Apple voice if the user hasn't chosen
-    // one yet — saves them a trip to the dropdown to escape "Samantha".
-    if (!app.prefs.voiceURI) {
-      const best = pickBestEnglishVoice(allVoices);
-      if (best) {
-        app.prefs.voiceURI = best.voiceURI;
-        TTS.setVoice(best.voiceURI);
-        savePrefs();
-      }
-    }
-    // By default, only show English non-novelty Enhanced/Premium/Siri voices.
-    // The "Show all" toggle restores the full list (including compact, foreign,
-    // and novelty voices) for anyone who specifically wants one of them.
-    const showAll = !!app.prefs.showAllVoices;
-    let voices = showAll ? allVoices : allVoices.filter(isPickableVoice);
-    // If filtering produced nothing, fall back to all English voices (still
-    // hide novelty + foreign) and tell the user how to install Enhanced.
-    if (!voices.length) {
-      voices = allVoices.filter(v => /^en/i.test(v.lang) && !isNoveltyVoice(v));
-      const note = document.createElement('option');
-      note.value = ''; note.disabled = true;
-      note.textContent = '— No Enhanced voices found. iOS Settings → Spoken Content → Voices → English → tap a voice → Enhanced —';
-      voiceSelect.appendChild(note);
-    }
-    const groups = {};
-    for (const v of voices) {
-      (groups[v.lang] = groups[v.lang] || []).push(v);
-    }
-    // Prefer English first
-    const langs = Object.keys(groups).sort((a, b) => {
-      const ae = /^en/i.test(a) ? 0 : 1;
-      const be = /^en/i.test(b) ? 0 : 1;
-      return ae - be || a.localeCompare(b);
-    });
-    for (const lang of langs) {
-      const g = document.createElement('optgroup');
-      g.label = lang;
-      const sorted = groups[lang].slice().sort((a, b) => {
-        const sa = voiceQualityScore(a), sb = voiceQualityScore(b);
-        if (sa !== sb) return sb - sa;
-        return (a.name || '').localeCompare(b.name || '');
-      });
-      for (const v of sorted) {
-        const o = document.createElement('option');
-        o.value = v.voiceURI;
-        const tier = voiceQualityScore(v) >= 2 ? ' ✦' : '';
-        o.textContent = v.name + tier + (v.default ? ' — default' : '');
-        if (app.prefs.voiceURI === v.voiceURI) o.selected = true;
-        g.appendChild(o);
-      }
-      voiceSelect.appendChild(g);
-    }
-  }
-
-  const showAllVoicesToggle = el('show-all-voices');
-  if (showAllVoicesToggle) {
-    showAllVoicesToggle.checked = !!app.prefs.showAllVoices;
-    showAllVoicesToggle.addEventListener('change', () => {
-      app.prefs.showAllVoices = showAllVoicesToggle.checked;
+  function applyBestVoice() {
+    const voices = TTS.voices;
+    if (!voices.length) return;
+    const best = pickBestEnglishVoice(voices);
+    if (best) {
+      app.prefs.voiceURI = best.voiceURI;
+      TTS.setVoice(best.voiceURI);
       savePrefs();
-      populateVoices();
-    });
+    }
   }
 
-  // Update the "Now using: X" label so the user can see exactly which
-  // voice the system has settled on. iOS's voice list is opaque about
-  // which entry maps to which iOS Settings name, so this is the ground
-  // truth — match it against your dropdown choice to confirm they're
-  // the same voice.
   function updateActiveVoiceLabel() {
     const lbl = document.getElementById('voice-active-label');
+    const hint = document.getElementById('voice-install-hint');
     if (!lbl) return;
     const voices = TTS.voices;
-    const v = voices.find(x => x.voiceURI === app.prefs.voiceURI);
-    if (v) {
-      const tier = voiceQualityScore(v) >= 2 ? '✦ ' : '';
-      lbl.textContent = `Now using: ${tier}${v.name} (${v.lang})`;
-    } else if (voices.length) {
-      // Picked URI doesn't match any current voice — iOS may have changed
-      // the URI between sessions. Show what'll be used as fallback.
-      const fallback = voices.find(x => /^en/i.test(x.lang) && x.default)
-                   || voices.find(x => /^en/i.test(x.lang))
-                   || voices[0];
-      lbl.textContent = `Picked voice not available — falling back to: ${fallback ? fallback.name : '(none)'}`;
-    } else {
-      lbl.textContent = 'No voices loaded yet — open after a tap.';
+    if (!voices.length) {
+      lbl.textContent = 'Loading…';
+      return;
+    }
+    const best = pickBestEnglishVoice(voices);
+    if (!best) {
+      lbl.textContent = 'No usable voice installed';
+      if (hint) hint.style.display = '';
+      return;
+    }
+    // Pin to the best voice so prefs match what we're actually using.
+    if (app.prefs.voiceURI !== best.voiceURI) {
+      app.prefs.voiceURI = best.voiceURI;
+      TTS.setVoice(best.voiceURI);
+      savePrefs();
+    }
+    const enhanced = voiceQualityScore(best) >= 3 ? ' (Enhanced)' : '';
+    lbl.textContent = best.name + enhanced;
+    if (hint) {
+      // Hint only when we couldn't get an Enhanced-tier voice — the user
+      // hasn't downloaded one yet and is stuck on a compact.
+      hint.style.display = voiceQualityScore(best) >= 3 ? 'none' : '';
     }
   }
 
-  // Test button: speak a sample sentence with the currently selected voice
-  // so the user can audition it without starting a real read-aloud.
+  // Test button: speak a short sample so the user can confirm the voice
+  // is the one they want (and iOS gets a chance to load voices on first tap).
   const voiceTestBtn = document.getElementById('voice-test-btn');
   if (voiceTestBtn) {
     voiceTestBtn.addEventListener('click', () => {
@@ -766,28 +718,18 @@
         return;
       }
       try { speechSynthesis.cancel(); } catch (_) {}
+      applyBestVoice();
       const u = new SpeechSynthesisUtterance(
-        'This is the voice the reader will use when Echo is off or offline.'
+        'This is the offline reading voice.'
       );
       const all = TTS.voices;
       const picked = all.find(x => x.voiceURI === app.prefs.voiceURI);
       if (picked) u.voice = picked;
       u.rate = app.prefs.rate || 1.0;
       speechSynthesis.speak(u);
-      // Log full voice list so the user / I can see exactly what iOS exposed.
-      console.log('[ereader] available voices:', all.map(v =>
-        ({ name: v.name, lang: v.lang, uri: v.voiceURI, default: v.default, score: voiceQualityScore(v) })));
-      console.log('[ereader] testing with:', picked ? picked.name : '(no match — using browser default)');
       updateActiveVoiceLabel();
     });
   }
-
-  voiceSelect.addEventListener('change', () => {
-    app.prefs.voiceURI = voiceSelect.value;
-    TTS.setVoice(voiceSelect.value);
-    savePrefs();
-    updateActiveVoiceLabel();
-  });
   // Two-way voice engine: 'echo' (Kokoro on Mac mini, online) or
   // 'web' (device speech, offline). Top-bar toggle flips between
   // them. Auto-falls-back to 'web' when the network goes down.
@@ -854,7 +796,7 @@
   reflectEngineMode();
   if (window.speechSynthesis) {
     speechSynthesis.addEventListener('voiceschanged', () => {
-      if (settingsDrawer.classList.contains('open')) populateVoices();
+      applyBestVoice();
       updateActiveVoiceLabel();
     });
   }

@@ -181,16 +181,12 @@
     <p class="hint" id="engine-mode-hint">Falls back to your device voice when offline.</p>
   </div>
   <div class="settings-group">
-    <label class="device-voice-label">Device voice (used in offline mode)</label>
+    <label class="device-voice-label">Offline voice</label>
     <div class="voice-picker-row">
-      <select id="voice-select"></select>
+      <div id="voice-active-label" class="voice-active-hint">—</div>
       <button id="voice-test-btn" type="button" class="btn-small" aria-label="Test this voice">▶ Test</button>
     </div>
-    <div id="voice-active-label" class="hint voice-active-hint">—</div>
-    <label class="toggle-row" style="margin-top:6px">
-      <span class="hint">Show all installed voices <span class="hint inline">— off shows only Siri/Premium/Enhanced</span></span>
-      <input id="show-all-voices" type="checkbox">
-    </label>
+    <p class="hint" id="voice-install-hint" style="display:none">Install Daniel (Enhanced) in iOS Settings → Accessibility → Spoken Content → Voices → English → Daniel.</p>
   </div>
   <div class="settings-group">
     <label>Reading speed</label>
