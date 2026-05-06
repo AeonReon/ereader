@@ -2,7 +2,7 @@
 // Bump the version string on every code change so old caches get evicted
 // and PWAs (especially on Android e-ink tablets) actually pick up the
 // new app.js / reader.js / tts.js. Without this bump, cache-first wins.
-const CACHE = 'reader-shell-v32-marker-fixed-not-absolute';
+const CACHE = 'reader-shell-v33-marker-as-progress-bar';
 const ASSETS = [
   './',
   './index.html',

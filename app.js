@@ -1120,15 +1120,11 @@
     const marker = document.getElementById('reading-marker');
     if (!marker) return;
     marker.classList.remove('hidden');
-    // Position at the *middle* of the current chunk's vertical range, not
-    // its start. onChunkStart fires when the chunk begins playing, but by
-    // the time the user looks at the page mid-chunk, the audio has moved
-    // halfway through it. Mid-chunk positioning makes the marker feel
-    // aligned with where the voice actually is.
-    const pct = totalChunks <= 0 ? 0.5 : ((chunkIdx + 0.5) / totalChunks);
-    // Map to 8%..92% of the reader-content area to keep clear of the
-    // top header / bottom footer regions, which are usually skipped anyway.
-    marker.style.top = (8 + pct * 84) + '%';
+    // Width-based bottom progress bar. Audio at chunk i of n → bar
+    // width is (i + 0.5) / n. Mid-chunk biasing keeps the bar from
+    // sitting at 0% while the first chunk is mid-playback.
+    const pct = totalChunks <= 0 ? 0 : ((chunkIdx + 0.5) / totalChunks);
+    marker.style.width = Math.max(0, Math.min(1, pct)) * 100 + '%';
   }
   function hideReadingMarker() {
     const marker = document.getElementById('reading-marker');

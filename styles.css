@@ -364,37 +364,24 @@ input, select { font: inherit; color: inherit; }
 }
 .reader-area.active { display: block; }
 
-/* "Now reading" marker — a CSS-drawn triangle on the right margin that
-   tracks roughly where the audio is on the page. Position: fixed
-   anchors it to the screen viewport rather than the scrollable
-   reader-content, so on devices where the page scrolls (BOOX e-ink
-   pinch-zoomed PDFs, Brave on Android) the marker stays put instead
-   of riding with the content. The marker reflects audio progress, not
-   pixel position, so it makes sense to pin it to the viewport. */
+/* "Now reading" marker — thin horizontal progress bar across the bottom
+   of the screen. Fills left-to-right as the audio progresses through
+   the page. Pinned to the viewport (position: fixed) so scrolling or
+   resizing can't hide it. Replaces the previous side-triangle design
+   that fought positioning on every device class. The bar is just a
+   YouTube-style progress indicator for the page's read-aloud — no
+   ambiguity about what it points to. */
 .reading-marker {
   position: fixed;
-  right: 4px;
-  top: 0;
-  width: 14px;
-  height: 22px;
-  margin-top: -11px;
-  z-index: 10;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 0%;
+  z-index: 100;
   pointer-events: none;
-  transition: top 0.4s ease;
-  background: #ffd166;
-  border-radius: 4px 0 0 4px;
-  box-shadow: -1px 0 0 rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.35);
-}
-.reading-marker::before {
-  /* Left-pointing triangle so the eye reads it as "this side, the text" */
-  content: '';
-  position: absolute;
-  left: -8px;
-  top: 50%;
-  margin-top: -6px;
-  border: 6px solid transparent;
-  border-right-color: #ffd166;
-  filter: drop-shadow(-1px 1px 1px rgba(0,0,0,0.25));
+  background: #d4a017;
+  box-shadow: 0 0 8px rgba(212, 160, 23, 0.6);
+  transition: width 0.5s ease;
 }
 .reading-marker.hidden { display: none; }
 
@@ -493,12 +480,9 @@ input, select { font: inherit; color: inherit; }
 }
 .btn-small:active { transform: scale(0.97); }
 .voice-active-hint { margin-top: 4px; font-size: 11px; opacity: 0.75; }
-#reader.theme-dark .reading-marker { background: #ffd166; }
-#reader.theme-dark .reading-marker::before { border-right-color: #ffd166; }
-#reader.theme-light .reading-marker { background: #d4a017; }
-#reader.theme-light .reading-marker::before { border-right-color: #d4a017; }
-#reader.theme-sepia .reading-marker { background: #b8860b; }
-#reader.theme-sepia .reading-marker::before { border-right-color: #b8860b; }
+#reader.theme-dark .reading-marker { background: #ffd166; box-shadow: 0 0 8px rgba(255, 209, 102, 0.6); }
+#reader.theme-light .reading-marker { background: #d4a017; box-shadow: 0 0 8px rgba(212, 160, 23, 0.6); }
+#reader.theme-sepia .reading-marker { background: #b8860b; box-shadow: 0 0 8px rgba(184, 134, 11, 0.5); }
 
 #pdf-area { display: none; text-align: center; background: #1c1c1c; }
 #pdf-area.active { display: flex; align-items: flex-start; justify-content: center; padding: 10px; }
