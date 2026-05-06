@@ -282,13 +282,16 @@ const TTS = (() => {
     state.playing = false;
     state.paused = false;
 
-    // Web Speech — cancel() on iOS isn't always immediate, so call it twice
-    // around a microtask boundary to flush more reliably.
+    // Web Speech: a single synchronous cancel(). The previous code queued
+    // a SECOND cancel() as a microtask "to be sure on iOS" — but that
+    // microtask ran AFTER the new utterance was speak()'d in the same
+    // play() call, cancelling everything we just queued. On Android with
+    // Piper this killed every page (one-second-per-page silent flip-
+    // through); on iOS it had been silently eating chunk 0 forever
+    // (= "first paragraph missing"). One cancel() is enough; modern
+    // browsers all handle it synchronously.
     if (window.speechSynthesis) {
       try { speechSynthesis.cancel(); } catch (_) {}
-      Promise.resolve().then(() => {
-        try { speechSynthesis.cancel(); } catch (_) {}
-      });
     }
     state.currentUtterance = null;
 
