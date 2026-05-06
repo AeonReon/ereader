@@ -224,12 +224,24 @@ const TTS = (() => {
     }
   }
 
+  // Web Speech path: speak the WHOLE page text in a single utterance and
+  // let the underlying engine (Piper / iOS / Apple voice) handle internal
+  // sentence splitting + streaming. The previous chunked implementation
+  // sent ~280-char fragments one at a time, which on Android with our
+  // custom Piper engine produced empty-utterance artifacts and a
+  // "page turns silently" symptom because each chunk's onend fired
+  // before audio drained, then the next utterance preempted whatever
+  // was still queued. One utterance = one onend = no race.
   function speakWebChunk(sessionId) {
     if (sessionId !== state.sessionId || !state.playing) return;
-    if (state.cursor >= state.chunks.length) return finish(sessionId);
     if (!window.speechSynthesis) return finish(sessionId);
 
-    const text = state.chunks[state.cursor];
+    // Join all chunks into a single text. We still keep the chunked
+    // representation in state.chunks so app.js's marker / position
+    // logic doesn't have to change, but only ONE utterance ever fires.
+    const text = state.chunks.slice(state.cursor).join(' ').trim();
+    if (!text) return finish(sessionId);
+
     const u = new SpeechSynthesisUtterance(text);
     const v = pickWebVoice(); if (v) u.voice = v;
     u.rate = state.rate; u.pitch = 1.0;
@@ -241,13 +253,16 @@ const TTS = (() => {
     u.onend = () => {
       if (sessionId !== state.sessionId) return;
       if (state.onChunkEnd) state.onChunkEnd(myCursor);
-      state.cursor = myCursor + 1;
-      if (state.playing) speakWebChunk(sessionId);
+      // Whole page was spoken — finish (no recursion since we sent it all
+      // in a single utterance). app.js's onStop hook handles auto-advance.
+      state.cursor = state.chunks.length;
+      finish(sessionId);
     };
-    u.onerror = () => {
+    u.onerror = (ev) => {
       if (sessionId !== state.sessionId) return;
-      state.cursor = myCursor + 1;
-      if (state.playing) speakWebChunk(sessionId);
+      console.warn('[TTS] web speech error:', ev && ev.error);
+      state.cursor = state.chunks.length;
+      finish(sessionId);
     };
     state.currentUtterance = u;
     speechSynthesis.speak(u);
