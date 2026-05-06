@@ -929,15 +929,21 @@
     return s.toLowerCase().replace(/\d+/g, '').replace(/\s+/g, ' ').trim();
   }
 
-  // Test whether a line is "chrome size" — its average glyph height is
-  // notably different from the page's body-text size. Headers tend to be
-  // smaller (running header) or much larger (chapter title); body lines
-  // cluster tightly around a single size. Threshold: 18% off the median.
-  // Returns null if we don't have height data (non-PDF formats).
-  function isChromeSized(lineMeta, medianH) {
+  // Test whether a line is "chrome size" AND short — chrome (running
+  // headers, chapter titles, page numbers) is consistently both a different
+  // typographic size AND short. The previous "size only" rule fired on
+  // perfectly normal long body paragraphs whose first sentence happened to
+  // sit on a slightly larger / smaller line, eating the first paragraph
+  // of every page. Real chrome is rarely longer than a short half-line,
+  // so requiring < 60 chars stops the false positives.
+  // Threshold widened to 28% off median so only clearly-different sizes
+  // (display chapter titles, footnote text) are flagged.
+  function isChromeSized(lineMeta, medianH, lineText) {
     if (!lineMeta || !medianH || !lineMeta.h) return null;
     const ratio = lineMeta.h / medianH;
-    return ratio < 0.82 || ratio > 1.22;
+    const sizeOdd = ratio < 0.72 || ratio > 1.28;
+    const short = (lineText || '').trim().length < 60;
+    return sizeOdd && short;
   }
 
   function median(values) {
@@ -963,19 +969,19 @@
     const firstMeta = linesMeta && linesMeta[0];
     const lastMeta = linesMeta && linesMeta.length > 1 ? linesMeta[linesMeta.length - 1] : null;
 
-    // Strip first line if: chrome-sized, OR seen-before, OR pure page #.
+    // Strip first line if: chrome-sized + short, OR seen-before, OR pure page #.
     if (first) {
       const norm = normaliseHeaderLine(first);
       const isPageNum = /^[\divxlcm.\-\s]+$/i.test(first.trim()) && first.trim().length < 8;
       const seenBefore = !!norm && app.recentFirstLines.includes(norm);
-      const sizeOdd = isChromeSized(firstMeta, medianH) === true;
+      const sizeOdd = isChromeSized(firstMeta, medianH, first) === true;
       if (isPageNum || seenBefore || sizeOdd) out.shift();
     }
     if (last && out.length) {
       const norm = normaliseHeaderLine(last);
       const isPageNum = /^[\divxlcm.\-\s]+$/i.test(last.trim()) && last.trim().length < 8;
       const seenBefore = !!norm && app.recentLastLines.includes(norm);
-      const sizeOdd = isChromeSized(lastMeta, medianH) === true;
+      const sizeOdd = isChromeSized(lastMeta, medianH, last) === true;
       if (isPageNum || seenBefore || sizeOdd) out.pop();
     }
 
