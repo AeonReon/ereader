@@ -365,14 +365,14 @@ input, select { font: inherit; color: inherit; }
 .reader-area.active { display: block; }
 
 /* "Now reading" marker — a CSS-drawn triangle on the right margin that
-   tracks roughly where the audio is on the page. Lets you look away,
-   then find your place again. Position is updated per-chunk by app.js.
-   CSS borders rather than an emoji so it renders the same on every
-   device (Brave on stripped Android e-ink doesn't have a reliable
-   emoji font). The pill shape gives contrast against the dark PDF
-   gutter as well as against a light page. */
+   tracks roughly where the audio is on the page. Position: fixed
+   anchors it to the screen viewport rather than the scrollable
+   reader-content, so on devices where the page scrolls (BOOX e-ink
+   pinch-zoomed PDFs, Brave on Android) the marker stays put instead
+   of riding with the content. The marker reflects audio progress, not
+   pixel position, so it makes sense to pin it to the viewport. */
 .reading-marker {
-  position: absolute;
+  position: fixed;
   right: 4px;
   top: 0;
   width: 14px;
