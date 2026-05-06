@@ -610,18 +610,24 @@
     return `${n.toFixed(n < 10 ? 1 : 0)} ${u[i]}`;
   }
 
-  // iOS exposes voice tier in the voiceURI ("com.apple.voice.enhanced.en-US.Daniel"
-  // vs ".compact." vs ".premium.") rather than in the .name field, so we have
-  // to look at both. Score is high → low: Siri / Premium / Enhanced / Neural
-  // / Natural / Compact / Novelty.
+  // Cross-platform voice quality scoring. iOS hides the tier in voiceURI
+  // (".enhanced.", ".premium.", ".compact."); Android voices from Google
+  // TTS use names like "Google UK English" with no tier marker, so we
+  // also score by name keywords + the localService=false flag (Network
+  // / cloud voices are higher quality than the on-device fallbacks).
   function voiceQualityScore(v) {
     const name = (v.name || '').toLowerCase();
     const uri = (v.voiceURI || '').toLowerCase();
     if (uri.includes('premium') || name.includes('premium')) return 4;
     if (uri.includes('siri') || name.includes('siri')) return 4;
+    // Android Google TTS Network / Wavenet voices are essentially Premium-tier.
+    if (name.includes('wavenet') || name.includes('network')) return 4;
     if (uri.includes('enhanced') || name.includes('enhanced')) return 3;
     if (uri.includes('neural') || uri.includes('natural') ||
         name.includes('neural') || name.includes('natural')) return 3;
+    // Generic Google TTS voices on Android — better than the bare Pico
+    // fallback, worse than cloud Wavenet. Score in the middle.
+    if (name.includes('google')) return 2;
     if (uri.includes('compact') || name.includes('compact')) return 1;
     return 0;
   }
@@ -645,20 +651,44 @@
     return voiceQualityScore(v) >= 3 || (v.default && voiceQualityScore(v) >= 1);
   }
 
-  // Single-voice strategy: prefer Daniel (Enhanced) for offline reading.
-  // The user has decided every other web-exposed Apple voice sounds bad,
-  // so the picker is gone — we just lock in Daniel-or-best-Enhanced and
-  // show its name as a label. If Daniel isn't installed, fall back to
-  // any other Enhanced English voice; if nothing Enhanced is installed,
-  // surface a hint pointing the user at iOS Settings to download one.
+  // Detect which platform we're on so the picker can pick a sensible
+  // default for each. iPad/iPhone get Daniel; Android (BOOX) gets the
+  // best Google TTS voice. Anything else falls through to "any English."
+  function isApplePlatform() {
+    const ua = navigator.userAgent || '';
+    const plat = navigator.platform || '';
+    if (/iPhone|iPad|iPod/i.test(ua)) return true;
+    // iPadOS 13+ identifies as Mac with touch support.
+    if (/Mac/i.test(plat) && navigator.maxTouchPoints > 1) return true;
+    return false;
+  }
+  function isAndroidPlatform() {
+    return /Android/i.test(navigator.userAgent || '');
+  }
+
+  // Single-voice strategy that adapts per platform:
+  //   iOS  → prefer Daniel (Enhanced), then any Enhanced English voice.
+  //   Android → prefer Google TTS English (UK, then US), then any voice
+  //     with a quality marker, then anything English.
+  //   Other → best-scored English voice.
   function pickBestEnglishVoice(voices) {
     const en = voices.filter(v => /^en/i.test(v.lang) && !isNoveltyVoice(v));
     if (!en.length) return null;
-    // Strong preference: Daniel Enhanced (matches "Daniel" in name AND
-    // any quality tier in URI, but settle for any Daniel if needed).
-    const daniel = en.find(v => /\bdaniel\b/i.test(v.name) && voiceQualityScore(v) >= 3)
-                || en.find(v => /\bdaniel\b/i.test(v.name));
-    if (daniel) return daniel;
+    if (isApplePlatform()) {
+      const daniel = en.find(v => /\bdaniel\b/i.test(v.name) && voiceQualityScore(v) >= 3)
+                  || en.find(v => /\bdaniel\b/i.test(v.name));
+      if (daniel) return daniel;
+    }
+    if (isAndroidPlatform()) {
+      // Google's UK English voice is generally the best-sounding offline
+      // option on Android; fall back to US, then any Google voice.
+      const ukGoogle = en.find(v => /google/i.test(v.name) && /en[-_]gb/i.test(v.lang));
+      if (ukGoogle) return ukGoogle;
+      const usGoogle = en.find(v => /google/i.test(v.name) && /en[-_]us/i.test(v.lang));
+      if (usGoogle) return usGoogle;
+      const anyGoogle = en.find(v => /google/i.test(v.name));
+      if (anyGoogle) return anyGoogle;
+    }
     return en.slice().sort((a, b) => {
       const sa = voiceQualityScore(a), sb = voiceQualityScore(b);
       if (sa !== sb) return sb - sa;
@@ -678,6 +708,16 @@
     }
   }
 
+  function platformInstallHint() {
+    if (isApplePlatform()) {
+      return 'iOS: Settings → Accessibility → Spoken Content → Voices → English → tap a voice → download the Enhanced tier (Daniel works well).';
+    }
+    if (isAndroidPlatform()) {
+      return 'Android: install Google Text-to-Speech from the Play Store (or APK on de-Googled devices), then in Settings → Accessibility → Text-to-Speech, set Google as the engine and download the English voice data.';
+    }
+    return 'Install a high-quality system text-to-speech engine for your device.';
+  }
+
   function updateActiveVoiceLabel() {
     const lbl = document.getElementById('voice-active-label');
     const hint = document.getElementById('voice-install-hint');
@@ -689,8 +729,11 @@
     }
     const best = pickBestEnglishVoice(voices);
     if (!best) {
-      lbl.textContent = 'No usable voice installed';
-      if (hint) hint.style.display = '';
+      lbl.textContent = 'No offline voice available';
+      if (hint) {
+        hint.textContent = platformInstallHint();
+        hint.style.display = '';
+      }
       return;
     }
     // Pin to the best voice so prefs match what we're actually using.
@@ -699,12 +742,22 @@
       TTS.setVoice(best.voiceURI);
       savePrefs();
     }
-    const enhanced = voiceQualityScore(best) >= 3 ? ' (Enhanced)' : '';
-    lbl.textContent = best.name + enhanced;
+    // Tag based on tier so the user knows when they're on Enhanced/cloud
+    // quality vs falling back to a basic engine.
+    const score = voiceQualityScore(best);
+    const tag = score >= 4 ? ' (Premium)'
+              : score >= 3 ? ' (Enhanced)'
+              : score >= 2 ? ''
+              : ' (basic — sounds robotic)';
+    lbl.textContent = best.name + tag;
     if (hint) {
-      // Hint only when we couldn't get an Enhanced-tier voice — the user
-      // hasn't downloaded one yet and is stuck on a compact.
-      hint.style.display = voiceQualityScore(best) >= 3 ? 'none' : '';
+      // Hint only when we're stuck on a low-quality basic voice.
+      if (score < 2) {
+        hint.textContent = 'Voice quality is basic. ' + platformInstallHint();
+        hint.style.display = '';
+      } else {
+        hint.style.display = 'none';
+      }
     }
   }
 
