@@ -246,9 +246,25 @@ const TTS = (() => {
     const v = pickWebVoice(); if (v) u.voice = v;
     u.rate = state.rate; u.pitch = 1.0;
     const myCursor = state.cursor;
+    let lastReportedIdx = -1;
     u.onstart = () => {
       if (sessionId !== state.sessionId) return;
       if (state.onChunkStart) state.onChunkStart(myCursor, text);
+    };
+    // Browser fires onboundary as it advances through the utterance.
+    // Use the charIndex to compute progress and map it to a virtual
+    // chunk index — keeps the reading-position marker advancing even
+    // though we're now sending the whole page in a single utterance.
+    u.onboundary = (event) => {
+      if (sessionId !== state.sessionId) return;
+      if (!state.onChunkStart) return;
+      const charIdx = (event && typeof event.charIndex === 'number') ? event.charIndex : 0;
+      const progress = charIdx / Math.max(1, text.length);
+      const virtualIdx = Math.min(state.chunks.length - 1, Math.floor(progress * state.chunks.length));
+      if (virtualIdx !== lastReportedIdx) {
+        lastReportedIdx = virtualIdx;
+        state.onChunkStart(virtualIdx, text);
+      }
     };
     u.onend = () => {
       if (sessionId !== state.sessionId) return;
