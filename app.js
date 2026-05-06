@@ -1112,34 +1112,16 @@
   }
 
   // ── Reading marker (right-margin "you are here" triangle) ─────────────
-  // A rough position cue, not a per-word highlight. Kokoro doesn't return
-  // word-level timing data, so per-word would need a different engine.
-  // Per-chunk vertical position lets the user look away and find their
-  // place again on look-back, which is the actual problem we're solving.
-  function showReadingMarker(chunkIdx, totalChunks) {
-    const marker = document.getElementById('reading-marker');
-    if (!marker) return;
-    marker.classList.remove('hidden');
-    // Width-based bottom progress bar. Audio at chunk i of n → bar
-    // width is (i + 0.5) / n. Mid-chunk biasing keeps the bar from
-    // sitting at 0% while the first chunk is mid-playback.
-    const pct = totalChunks <= 0 ? 0 : ((chunkIdx + 0.5) / totalChunks);
-    marker.style.width = Math.max(0, Math.min(1, pct)) * 100 + '%';
-  }
-  function hideReadingMarker() {
-    const marker = document.getElementById('reading-marker');
-    if (marker) marker.classList.add('hidden');
-  }
+  // (showReadingMarker / hideReadingMarker removed — they were the
+  // wrapper for the bottom progress bar / side triangle marker
+  // experiments. Audio playback is what matters; the marker added
+  // more complexity than value. Could come back as a per-word
+  // text highlight later if it's worth doing properly.)
 
   // Drives read-aloud across page boundaries. When TTS finishes the last
   // chunk of the current page, onStop fires; we turn the page and recurse.
-  // Replaced the old setInterval polling watcher (was racing with onStop's
-  // setTtsUI(false) and getting killed before it could advance).
   function playPageAndAdvance(text) {
-    const totalChunks = TTS.chunk(text).length;
-    showReadingMarker(0, totalChunks);
     TTS.play(text, {
-      onChunkStart: (i) => showReadingMarker(i, totalChunks),
       // Toast once per session when Echo can't be reached and we drop to
       // the device voice — otherwise the user hears the voice change
       // and assumes something's broken instead of "I'm offline."
@@ -1152,10 +1134,7 @@
       },
       onStop: async () => {
         // User pressed Stop, or the book ran out — bail without advancing.
-        if (!app.ttsActive) {
-          hideReadingMarker();
-          return;
-        }
+        if (!app.ttsActive) return;
         // navigatePage() is mid-flight: it's already going to start the
         // new page itself, so don't auto-advance here too (would skip a page).
         if (app.suppressNextAdvance) {
@@ -1199,7 +1178,6 @@
       ttsBtn.classList.toggle('is-playing', on);
       ttsBtn.setAttribute('aria-label', on ? 'Stop reading' : 'Read aloud');
     }
-    if (!on) hideReadingMarker();
     // Reflect state on the lock screen so the play/pause icon matches reality.
     if ('mediaSession' in navigator) {
       navigator.mediaSession.playbackState = on ? 'playing' : 'paused';

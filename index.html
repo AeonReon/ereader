@@ -87,9 +87,6 @@
     <div id="pdf-area" class="reader-area"><canvas id="pdf-canvas"></canvas></div>
     <div id="txt-area" class="reader-area"><div id="txt-body"></div></div>
     <div id="loading" class="loading hidden">Loading…</div>
-    <!-- "Now reading" position marker on the right margin. Driven by app.js
-         from TTS.onChunkStart events. Only visible while read-aloud is on. -->
-    <div id="reading-marker" class="reading-marker hidden" aria-hidden="true"></div>
   </div>
 
   <footer class="reader-bar bottom">
@@ -232,7 +229,7 @@
      once the reader feels stable. -->
 <script>
   (function () {
-    const VERSION = 'v33-marker-as-progress-bar';
+    const VERSION = 'v34-marker-removed';
     const pill = document.createElement('div');
     pill.style.cssText = 'position:fixed;bottom:6px;right:8px;font-size:10px;' +
       'opacity:0.55;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;' +

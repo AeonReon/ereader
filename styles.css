@@ -364,26 +364,11 @@ input, select { font: inherit; color: inherit; }
 }
 .reader-area.active { display: block; }
 
-/* "Now reading" marker — thin horizontal progress bar across the bottom
-   of the screen. Fills left-to-right as the audio progresses through
-   the page. Pinned to the viewport (position: fixed) so scrolling or
-   resizing can't hide it. Replaces the previous side-triangle design
-   that fought positioning on every device class. The bar is just a
-   YouTube-style progress indicator for the page's read-aloud — no
-   ambiguity about what it points to. */
-.reading-marker {
-  position: fixed;
-  left: 0;
-  bottom: 0;
-  height: 3px;
-  width: 0%;
-  z-index: 100;
-  pointer-events: none;
-  background: #d4a017;
-  box-shadow: 0 0 8px rgba(212, 160, 23, 0.6);
-  transition: width 0.5s ease;
-}
-.reading-marker.hidden { display: none; }
+/* (reading-marker removed — could never get the positioning right
+   across BOOX scroll behaviour; user said audio is the important
+   part. If we want to bring it back later, the cleanest approach is
+   probably to add a per-utterance overlay highlight on the actual
+   text being read, not a progress indicator.) */
 
 /* Voice-engine quick toggle in the top bar. Three states:
    E = Echo (Kokoro on Mac mini, needs internet, gold)
@@ -480,9 +465,6 @@ input, select { font: inherit; color: inherit; }
 }
 .btn-small:active { transform: scale(0.97); }
 .voice-active-hint { margin-top: 4px; font-size: 11px; opacity: 0.75; }
-#reader.theme-dark .reading-marker { background: #ffd166; box-shadow: 0 0 8px rgba(255, 209, 102, 0.6); }
-#reader.theme-light .reading-marker { background: #d4a017; box-shadow: 0 0 8px rgba(212, 160, 23, 0.6); }
-#reader.theme-sepia .reading-marker { background: #b8860b; box-shadow: 0 0 8px rgba(184, 134, 11, 0.5); }
 
 #pdf-area { display: none; text-align: center; background: #1c1c1c; }
 #pdf-area.active { display: flex; align-items: flex-start; justify-content: center; padding: 10px; }
