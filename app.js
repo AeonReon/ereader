@@ -934,16 +934,29 @@
   // typographic size AND short. The previous "size only" rule fired on
   // perfectly normal long body paragraphs whose first sentence happened to
   // sit on a slightly larger / smaller line, eating the first paragraph
-  // of every page. Real chrome is rarely longer than a short half-line,
-  // so requiring < 60 chars stops the false positives.
-  // Threshold widened to 28% off median so only clearly-different sizes
-  // (display chapter titles, footnote text) are flagged.
+  // of every page. Real chrome is rarely longer than a short half-line.
   function isChromeSized(lineMeta, medianH, lineText) {
     if (!lineMeta || !medianH || !lineMeta.h) return null;
     const ratio = lineMeta.h / medianH;
     const sizeOdd = ratio < 0.72 || ratio > 1.28;
     const short = (lineText || '').trim().length < 60;
     return sizeOdd && short;
+  }
+
+  // Detect letter-spaced display text — the PDF-kerning artifact where a
+  // chapter title like "HOW RICHES COME TO YOU" comes through as
+  // "H OW R I C H E S CO M E T O YOU" because each glyph has wide
+  // tracking. TTS reads this letter-by-letter, which is what the user
+  // perceived as "first paragraph missing": the engine is actually
+  // reciting the chapter title for 10 seconds before the body starts.
+  // Heuristic: if more than half the "words" are 1-2 chars, it's almost
+  // certainly letter-spaced display text, not normal prose.
+  function isLetterSpaced(text) {
+    if (!text) return false;
+    const words = text.trim().split(/\s+/);
+    if (words.length < 5) return false;
+    const shortWords = words.filter(w => w.length <= 2).length;
+    return shortWords / words.length > 0.55;
   }
 
   function median(values) {
@@ -969,20 +982,36 @@
     const firstMeta = linesMeta && linesMeta[0];
     const lastMeta = linesMeta && linesMeta.length > 1 ? linesMeta[linesMeta.length - 1] : null;
 
-    // Strip first line if: chrome-sized + short, OR seen-before, OR pure page #.
-    if (first) {
-      const norm = normaliseHeaderLine(first);
-      const isPageNum = /^[\divxlcm.\-\s]+$/i.test(first.trim()) && first.trim().length < 8;
-      const seenBefore = !!norm && app.recentFirstLines.includes(norm);
-      const sizeOdd = isChromeSized(firstMeta, medianH, first) === true;
-      if (isPageNum || seenBefore || sizeOdd) out.shift();
+    // Strip leading chrome lines until we hit something that looks like
+    // body text. Some PDFs have multiple lines of chrome at the page
+    // top (page number, then chapter number, then chapter title) — strip
+    // them all. Cap at 3 strips so a layout we don't understand can't
+    // eat the whole page. Same logic for the bottom.
+    let stripped = 0
+    while (out.length > 1 && stripped < 3) {
+      const line = out[0]
+      const meta = linesMeta ? linesMeta[lines.length - out.length] : null
+      const norm = normaliseHeaderLine(line)
+      const isPageNum = /^[\divxlcm.\-\s]+$/i.test(line.trim()) && line.trim().length < 8
+      const seenBefore = !!norm && app.recentFirstLines.includes(norm)
+      const sizeOdd = isChromeSized(meta, medianH, line) === true
+      const letterSpaced = isLetterSpaced(line)
+      if (isPageNum || seenBefore || sizeOdd || letterSpaced) {
+        out.shift(); stripped++
+      } else break
     }
-    if (last && out.length) {
-      const norm = normaliseHeaderLine(last);
-      const isPageNum = /^[\divxlcm.\-\s]+$/i.test(last.trim()) && last.trim().length < 8;
-      const seenBefore = !!norm && app.recentLastLines.includes(norm);
-      const sizeOdd = isChromeSized(lastMeta, medianH, last) === true;
-      if (isPageNum || seenBefore || sizeOdd) out.pop();
+    stripped = 0
+    while (out.length > 1 && stripped < 3) {
+      const line = out[out.length - 1]
+      const meta = linesMeta ? linesMeta[linesMeta.length - 1 - stripped] : null
+      const norm = normaliseHeaderLine(line)
+      const isPageNum = /^[\divxlcm.\-\s]+$/i.test(line.trim()) && line.trim().length < 8
+      const seenBefore = !!norm && app.recentLastLines.includes(norm)
+      const sizeOdd = isChromeSized(meta, medianH, line) === true
+      const letterSpaced = isLetterSpaced(line)
+      if (isPageNum || seenBefore || sizeOdd || letterSpaced) {
+        out.pop(); stripped++
+      } else break
     }
 
     // Update history with the *original* first / last (unfiltered) so the
@@ -1137,6 +1166,13 @@
           app.suppressNextAdvance = false;
           return;
         }
+        // Let the system audio buffer drain before we hardReset for the
+        // next page. Without this, on Android the last fraction of a
+        // second of the final sentence gets cut by speechSynthesis.cancel()
+        // — perceived as "skipped the last sentence." 700 ms is enough
+        // to flush AudioTrack on the BOOX without a noticeable gap.
+        await new Promise(r => setTimeout(r, 700));
+        if (!app.ttsActive) return;
         const beforePos = JSON.stringify(Reader.currentPosition());
         Reader.next();
         // Give the reader a moment to render the new page before grabbing text.

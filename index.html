@@ -225,6 +225,22 @@
 <script src="tts.js"></script>
 <script src="reader.js"></script>
 <script src="app.js"></script>
+<!-- Always-visible build version pill in the bottom-right corner. Drives
+     out "did the cache update?" doubt while the reader is still in
+     active iteration. Pulls the same stamp the SW uses so what you see
+     on screen matches what's actually loaded. Remove this script block
+     once the reader feels stable. -->
+<script>
+  (function () {
+    const VERSION = 'v28-letter-spaced-strip-drain';
+    const pill = document.createElement('div');
+    pill.style.cssText = 'position:fixed;bottom:6px;right:8px;font-size:10px;' +
+      'opacity:0.55;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;' +
+      'pointer-events:none;z-index:99;color:#888;';
+    pill.textContent = VERSION;
+    document.addEventListener('DOMContentLoaded', () => document.body.appendChild(pill));
+  })();
+</script>
 <script>
   // Register the service worker AND show a "🔄 New version available" banner
   // when a newer SW is installed and waiting. Without this, PWAs on Android
