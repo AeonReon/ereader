@@ -2,7 +2,7 @@
 // Bump the version string on every code change so old caches get evicted
 // and PWAs (especially on Android e-ink tablets) actually pick up the
 // new app.js / reader.js / tts.js. Without this bump, cache-first wins.
-const CACHE = 'reader-shell-v34-marker-removed';
+const CACHE = 'reader-shell-v35';
 const ASSETS = [
   './',
   './index.html',
@@ -18,6 +18,8 @@ const ASSETS = [
   './vendor/pdf.worker.min.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
+  './icons/icon-1024.png',
+  './icons/apple-touch-icon.png',
   './icons/icon-maskable-512.png',
 ];
 

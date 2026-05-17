@@ -6,39 +6,44 @@
    ────────────────────────────────────────────── */
 
 :root {
-  /* Ivory library palette */
-  --paper:       #f6f1e6;
-  --paper-2:     #efe7d4;
-  --paper-warm:  #faf6ec;
-  --ink:         #1b2a4a;        /* deep navy ink */
-  --ink-2:       #3b4a6b;
-  --ink-soft:    #5a6784;
-  --ink-dim:     #8992aa;
-  --line:        rgba(27, 42, 74, 0.10);
-  --line-strong: rgba(27, 42, 74, 0.18);
+  /* Ivory library palette — matches workspace canon */
+  --paper:       #F7F4EE;
+  --paper-2:     #F0EBE0;
+  --paper-warm:  #FFFBF5;
+  --ink:         #1A2433;        /* deep navy ink */
+  --ink-2:       #3B4A6B;
+  --ink-soft:    #5A6577;
+  --ink-dim:     #9CA3AF;
+  --line:        rgba(217, 160, 45, 0.22);
+  --line-strong: rgba(217, 160, 45, 0.42);
 
-  /* Navy & gold */
-  --navy:        #0f2150;
-  --navy-dk:     #0b1b3a;
-  --navy-deep:   #060e22;
-  --gold:        #c8a04e;
-  --gold-2:      #a98537;
-  --gold-soft:   rgba(200, 160, 78, 0.12);
-  --gold-glow:   rgba(200, 160, 78, 0.28);
-  --gold-ink:    #5a3d0f;
+  /* Navy & gold — gold brightened to match canon (D9A02D family) */
+  --navy:        #0F2150;
+  --navy-dk:     #0B1B3A;
+  --navy-deep:   #060E22;
+  --gold:        #D9A02D;
+  --gold-2:      #A8771A;
+  --gold-bright: #F2BB44;
+  --gold-soft:   rgba(217, 160, 45, 0.14);
+  --gold-glow:   rgba(217, 160, 45, 0.30);
+  --gold-ink:    #0A2042;
 
-  /* Dark surface (reader dark mode) */
-  --dk-bg:       #0e1a2e;
-  --dk-surface:  #14233f;
+  /* Blue secondary — for gradient outline buttons (matches canon) */
+  --blue:        #2D7AB8;
+  --blue-dim:    #1F5A8E;
+
+  /* Dark surface (reader content dark mode, separate from app dark mode) */
+  --dk-bg:       #0E1A2E;
+  --dk-surface:  #14233F;
   --dk-line:     rgba(255,255,255,0.08);
-  --dk-ink:      #e8ecf4;
-  --dk-ink-dim:  #93a0bc;
+  --dk-ink:      #E8ECF4;
+  --dk-ink-dim:  #93A0BC;
 
   --radius:      16px;
   --radius-sm:   10px;
-  --shadow-1:    0 1px 2px rgba(27,42,74,0.06), 0 2px 8px rgba(27,42,74,0.05);
-  --shadow-2:    0 2px 6px rgba(27,42,74,0.08), 0 12px 28px -8px rgba(27,42,74,0.15);
-  --shadow-3:    0 6px 16px rgba(27,42,74,0.10), 0 30px 60px -16px rgba(27,42,74,0.20);
+  --shadow-1:    0 1px 2px rgba(80,50,30,0.06), 0 2px 8px rgba(80,50,30,0.06);
+  --shadow-2:    0 2px 6px rgba(80,50,30,0.08), 0 12px 28px -8px rgba(80,50,30,0.14);
+  --shadow-3:    0 6px 16px rgba(80,50,30,0.10), 0 30px 60px -16px rgba(80,50,30,0.18);
   --safe-top:    env(safe-area-inset-top);
   --safe-bot:    env(safe-area-inset-bottom);
 
@@ -47,6 +52,44 @@
   --font-serif:   "Fraunces", "Iowan Old Style", Georgia, "Times New Roman", serif;
   --font-mono:    ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+
+/* ===== APP DARK THEME ===== sky-blue + yellow, pulled from the app icon */
+:root[data-theme="dark"] {
+  --paper:       #103464;
+  --paper-2:     #1A4380;
+  --paper-warm:  #1F4A8C;
+  --ink:         #FFF6E0;
+  --ink-2:       #DCE5F5;
+  --ink-soft:    #B5C8E0;
+  --ink-dim:     #708FB2;
+  --line:        rgba(255, 204, 68, 0.22);
+  --line-strong: rgba(255, 204, 68, 0.42);
+
+  /* Navy stays navy — book covers and other navy backgrounds keep their colour */
+  /* (text usages of --navy are overridden per-selector below) */
+
+  --gold:        #FFCC44;
+  --gold-2:      #E5A82A;
+  --gold-bright: #FFDD66;
+  --gold-soft:   rgba(255, 204, 68, 0.18);
+  --gold-glow:   rgba(255, 204, 68, 0.36);
+  --gold-ink:    #0A2042;
+
+  --blue:        #4FA3E0;
+  --blue-dim:    #2D7AB8;
+
+  --shadow-1:    0 1px 2px rgba(0,0,0,0.30), 0 2px 8px rgba(0,0,0,0.30);
+  --shadow-2:    0 2px 6px rgba(0,0,0,0.35), 0 12px 28px -8px rgba(0,0,0,0.40);
+  --shadow-3:    0 6px 16px rgba(0,0,0,0.45), 0 30px 60px -16px rgba(0,0,0,0.55);
+}
+/* Dark mode: anywhere --navy is used as TEXT colour, swap to cream */
+:root[data-theme="dark"] .brand h1,
+:root[data-theme="dark"] .hero-title,
+:root[data-theme="dark"] .book-title,
+:root[data-theme="dark"] .drawer-head h2,
+:root[data-theme="dark"] .btn-icon:hover { color: var(--ink); }
+:root[data-theme="dark"] .drawer-tabs .tab.active { background: var(--gold); color: var(--gold-ink); }
+:root[data-theme="dark"] .toast { background: var(--paper-2); color: var(--ink); border: 1px solid var(--line); }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; padding: 0; height: 100%; }
@@ -72,11 +115,18 @@ input, select { font: inherit; color: inherit; }
 /* ── Library surface — warm paper + subtle grain ── */
 #library {
   background:
-    radial-gradient(1400px 900px at 8% -10%, rgba(200,160,78,0.08) 0%, transparent 55%),
-    radial-gradient(1200px 700px at 92% 100%, rgba(15,33,80,0.05) 0%, transparent 60%),
+    radial-gradient(1400px 900px at 8% -10%, rgba(217, 160, 45, 0.10) 0%, transparent 55%),
+    radial-gradient(1200px 700px at 92% 100%, rgba(45, 122, 184, 0.06) 0%, transparent 60%),
     linear-gradient(180deg, var(--paper-warm) 0%, var(--paper) 100%);
   overflow: hidden;
 }
+:root[data-theme="dark"] #library {
+  background:
+    radial-gradient(1400px 900px at 8% -10%, rgba(255, 204, 68, 0.10) 0%, transparent 55%),
+    radial-gradient(1200px 700px at 92% 100%, rgba(79, 163, 224, 0.10) 0%, transparent 60%),
+    linear-gradient(180deg, var(--paper-warm) 0%, var(--paper) 100%);
+}
+:root[data-theme="dark"] #library::before { opacity: 0.25; }
 
 /* Very faint paper texture */
 #library::before {
@@ -95,10 +145,11 @@ input, select { font: inherit; color: inherit; }
   display: flex; justify-content: space-between; align-items: center;
   padding: calc(14px + var(--safe-top)) 20px 14px;
   border-bottom: 1px solid var(--line);
-  background: rgba(250,246,236,0.72);
+  background: rgba(255, 251, 245, 0.82);
   backdrop-filter: saturate(140%) blur(14px);
   -webkit-backdrop-filter: saturate(140%) blur(14px);
 }
+:root[data-theme="dark"] .top-bar { background: rgba(26, 67, 128, 0.82); }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand h1 {
   font-family: var(--font-display);
@@ -140,10 +191,27 @@ input, select { font: inherit; color: inherit; }
   width: 40px; height: 40px; border-radius: 10px;
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--ink-2);
-  transition: background .15s ease, color .15s ease;
+  background:
+    linear-gradient(var(--paper-warm), var(--paper-warm)) padding-box,
+    linear-gradient(135deg, var(--gold), var(--blue)) border-box;
+  border: 1.5px solid transparent;
+  transition: transform .12s ease, color .15s ease;
 }
-.btn-icon:hover { background: rgba(27,42,74,0.05); color: var(--navy); }
-.btn-icon:active { background: rgba(27,42,74,0.10); }
+.btn-icon:hover { color: var(--navy); }
+.btn-icon:active { transform: scale(0.94); }
+
+/* Top-bar buttons inside the reader (.reader-bar) keep the simpler dark style */
+.reader-bar .btn-icon {
+  background: transparent;
+  border: 1.5px solid transparent;
+}
+.reader-bar .btn-icon:hover { background: rgba(255,255,255,0.06); }
+
+/* Theme toggle — sun/moon icon swap */
+.theme-toggle .icon-sun { display: none; }
+.theme-toggle .icon-moon { display: block; }
+:root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+:root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
 
 /* ── Hero ── */
 .library-hero {
@@ -182,21 +250,24 @@ input, select { font: inherit; color: inherit; }
   margin: 18px 24px 12px;
   max-width: 1280px; margin-left: auto; margin-right: auto;
   padding: 18px 18px;
-  border: 1.5px dashed rgba(200,160,78,0.5);
+  border: 1.5px dashed var(--line-strong);
   border-radius: var(--radius);
   text-align: center;
   color: var(--ink-soft);
-  background: linear-gradient(180deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.15) 100%);
+  background: linear-gradient(180deg, rgba(255,255,255,0.50) 0%, rgba(255,255,255,0.15) 100%);
   display: flex; align-items: center; justify-content: center; gap: 14px;
   flex-wrap: wrap;
   transition: border-color .2s ease, background .2s ease, color .2s ease;
+}
+:root[data-theme="dark"] .drop-zone {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
 }
 .drop-zone .drop-icon { color: var(--gold-2); opacity: 0.75; }
 .drop-zone p { margin: 0; font-size: 14px; }
 .drop-zone .subtle { font-size: 13px; color: var(--ink-dim); }
 .drop-zone.hover {
-  border-color: var(--gold-2);
-  background: linear-gradient(180deg, rgba(200,160,78,0.10), rgba(200,160,78,0.04));
+  border-color: var(--gold);
+  background: var(--gold-soft);
   color: var(--ink);
 }
 
@@ -724,22 +795,24 @@ input, select { font: inherit; color: inherit; }
 }
 .seg {
   display: flex; gap: 0;
-  background: rgba(27,42,74,0.05);
-  border: 1px solid var(--line);
+  background:
+    linear-gradient(var(--paper-warm), var(--paper-warm)) padding-box,
+    linear-gradient(135deg, var(--gold), var(--blue)) border-box;
+  border: 1.5px solid transparent;
   border-radius: 10px; padding: 3px; width: 100%;
 }
 .seg.wrap { flex-wrap: wrap; }
 .seg button {
   flex: 1; padding: 9px 10px; border-radius: 8px;
-  color: var(--ink-soft); font-size: 13px; font-weight: 500;
+  color: var(--ink-soft); font-size: 13px; font-weight: 600;
   transition: background .12s, color .12s, box-shadow .12s;
   white-space: nowrap;
 }
 .seg button:hover { color: var(--ink); }
 .seg button.active {
-  background: #fff;
-  color: var(--navy);
-  box-shadow: 0 1px 2px rgba(27,42,74,0.08), 0 1px 1px rgba(27,42,74,0.06);
+  background: linear-gradient(135deg, var(--gold-bright), var(--gold));
+  color: var(--gold-ink);
+  box-shadow: 0 2px 6px rgba(217, 160, 45, 0.30);
 }
 
 /* Scrim + toast */
