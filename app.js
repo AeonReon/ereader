@@ -1132,6 +1132,12 @@
           ? '📡 Offline — using device voice'
           : '📡 Echo unreachable — using device voice');
       },
+      // Device has no working TTS voice at all — stop cleanly instead of
+      // silently flipping through every page. Tell the user how to fix it.
+      onNoVoice: () => {
+        setTtsUI(false);
+        showToast('🔇 No device voice installed. Settings → Text-to-speech → install a voice, or reconnect for Echo.', 7000);
+      },
       onStop: async () => {
         // User pressed Stop, or the book ran out — bail without advancing.
         if (!app.ttsActive) return;

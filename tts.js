@@ -16,6 +16,9 @@
 const TTS = (() => {
   const ECHO_ENDPOINT = 'https://tts.aiprofits.cc/api/tts';
   const CLONE_ENDPOINT = 'https://tts.aiprofits.cc/api/clone-tts';
+  // Voice-agent password gate — sent as X-API-Key on every TTS call. Update
+  // here (or set window.VOICE_AGENT_KEY before this script loads) if rotated.
+  const VOICE_AGENT_KEY = (typeof window !== 'undefined' && window.VOICE_AGENT_KEY) || '1234';
   const ECHO_VOICE = 'am_echo';
   const CHUNK_MAX = 280;
 
@@ -114,7 +117,7 @@ const TTS = (() => {
       : { text, voice: ECHO_VOICE, speed: state.rate };
     const r = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': VOICE_AGENT_KEY },
       body: JSON.stringify(body),
       signal,
     });
@@ -247,6 +250,35 @@ const TTS = (() => {
     u.rate = state.rate; u.pitch = 1.0;
     const myCursor = state.cursor;
     let lastReportedIdx = -1;
+    // Track whether this utterance actually produced audio. On a device with
+    // NO installed TTS engine/voice (seen on the BOOX after an app update),
+    // speechSynthesis.speak() fires onend almost immediately with no sound —
+    // which the app reads as "page finished" and auto-advances, producing a
+    // silent runaway flip-through of the whole book that won't stop. We detect
+    // that here (implausibly fast end, no word boundaries) and route to a
+    // dedicated no-voice failure instead of the normal finish/advance path.
+    const speakStart = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now();
+    let gotBoundary = false;
+    function elapsedMs() {
+      const now = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
+      return now - speakStart;
+    }
+    // A genuinely-spoken sentence of 60+ chars always takes well over a second;
+    // if a long page "finishes" in under 400ms and never fired a word boundary,
+    // no audio came out.
+    function producedNoAudio() {
+      return text.length > 60 && !gotBoundary && elapsedMs() < 400;
+    }
+    function failNoVoice() {
+      if (sessionId !== state.sessionId) return;
+      state.playing = false;
+      state.paused = false;
+      state.cursor = state.chunks.length;
+      // Deliberately do NOT call onStop — that path auto-advances the page.
+      if (state.onNoVoice) state.onNoVoice();
+    }
     u.onstart = () => {
       if (sessionId !== state.sessionId) return;
       if (state.onChunkStart) state.onChunkStart(myCursor, text);
@@ -257,6 +289,7 @@ const TTS = (() => {
     // though we're now sending the whole page in a single utterance.
     u.onboundary = (event) => {
       if (sessionId !== state.sessionId) return;
+      gotBoundary = true;
       if (!state.onChunkStart) return;
       const charIdx = (event && typeof event.charIndex === 'number') ? event.charIndex : 0;
       const progress = charIdx / Math.max(1, text.length);
@@ -268,6 +301,12 @@ const TTS = (() => {
     };
     u.onend = () => {
       if (sessionId !== state.sessionId) return;
+      // No audio actually came out → device has no working voice. Stop and
+      // tell the app, rather than silently turning the page and looping.
+      if (producedNoAudio()) {
+        console.warn('[TTS] device voice produced no audio — no TTS engine installed?');
+        return failNoVoice();
+      }
       if (state.onChunkEnd) state.onChunkEnd(myCursor);
       // Whole page was spoken — finish (no recursion since we sent it all
       // in a single utterance). app.js's onStop hook handles auto-advance.
@@ -276,7 +315,15 @@ const TTS = (() => {
     };
     u.onerror = (ev) => {
       if (sessionId !== state.sessionId) return;
-      console.warn('[TTS] web speech error:', ev && ev.error);
+      const err = ev && ev.error;
+      console.warn('[TTS] web speech error:', err);
+      // 'synthesis-unavailable' / 'synthesis-failed' / 'audio-busy' mean the
+      // device can't speak at all — treat as no-voice so we don't loop-advance.
+      if (err === 'synthesis-unavailable' || err === 'synthesis-failed'
+          || err === 'audio-busy' || err === 'language-unavailable'
+          || err === 'voice-unavailable' || producedNoAudio()) {
+        return failNoVoice();
+      }
       state.cursor = state.chunks.length;
       finish(sessionId);
     };
@@ -386,6 +433,7 @@ const TTS = (() => {
       state.onChunkEnd = hooks.onChunkEnd || null;
       state.onStop = hooks.onStop || null;
       state.onFallback = hooks.onFallback || null;
+      state.onNoVoice = hooks.onNoVoice || null;
       state.abortController = new AbortController();
 
       // Prime BOTH playback paths inside the user gesture so iOS lets
