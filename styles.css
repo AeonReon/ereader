@@ -862,3 +862,73 @@ input, select { font: inherit; color: inherit; }
   .btn-primary { padding: 9px 11px; }
   .brand h1 { font-size: 18px; }
 }
+
+/* -------------------- Classics shelf -------------------- */
+.btn-classics {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 18px;
+  padding: 11px 18px;
+  font-family: var(--font-sans); font-size: 14px; font-weight: 600;
+  color: var(--gold-ink);
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  border: none; border-radius: var(--radius-sm);
+  box-shadow: 0 2px 10px var(--gold-glow);
+  cursor: pointer;
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.btn-classics:hover { transform: translateY(-2px); }
+.btn-classics:active { transform: translateY(0); }
+.btn-classics svg { opacity: 0.85; }
+
+.classics-intro {
+  max-width: 760px; margin: 0 auto;
+  padding: 8px 20px 4px;
+}
+.classics-search {
+  width: 100%; margin-top: 10px;
+  padding: 11px 14px;
+  font-family: var(--font-sans); font-size: 15px;
+  color: var(--ink);
+  background: var(--paper-warm);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+.classics-search:focus { border-color: var(--gold); }
+
+.classics-list {
+  max-width: 760px; margin: 0 auto;
+  padding: 10px 20px calc(40px + var(--safe-bot));
+  display: flex; flex-direction: column; gap: 8px;
+}
+.classic-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 12px;
+  background: var(--paper-warm);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.classic-row:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.classic-cover {
+  flex: 0 0 auto; width: 40px; height: 56px;
+  display: grid; place-items: center;
+  font-family: var(--font-display); font-size: 20px; font-weight: 600;
+  color: var(--gold-ink);
+  background: linear-gradient(160deg, var(--gold-soft), var(--gold-glow));
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+}
+.classic-meta { flex: 1 1 auto; min-width: 0; }
+.classic-title {
+  font-family: var(--font-display); font-size: 16px; font-weight: 600;
+  color: var(--ink); margin: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.classic-author {
+  font-family: var(--font-sans); font-size: 13px;
+  color: var(--ink-soft); margin: 2px 0 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.classic-get { flex: 0 0 auto; }

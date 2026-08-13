@@ -54,6 +54,10 @@
     <div class="hero-inner">
       <h2 class="hero-title">Your <em>Library</em></h2>
       <p class="hero-sub">A quiet place for EPUB, PDF, and text — on every device you own.</p>
+      <button id="classics-btn" class="btn-classics">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M6 2h9a3 3 0 0 1 3 3v14a1 1 0 0 1-1 1H7a2 2 0 0 0-2 2V4a2 2 0 0 1 1-2zm0 16.27A3.99 3.99 0 0 1 7 18h9V5a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1v13.27z"/></svg>
+        <span>Browse the Classics</span>
+      </button>
     </div>
   </div>
 
@@ -66,6 +70,23 @@
   <div id="book-grid" class="book-grid"></div>
 
   <input id="file-input" type="file" multiple accept=".epub,.pdf,.txt,application/epub+zip,application/pdf,text/plain" hidden>
+</section>
+
+<!-- Classics library view (streamed from the mini via library.aiprofits.cc) -->
+<section id="classics" class="view">
+  <header class="top-bar">
+    <button id="classics-back" class="btn-icon" aria-label="Back to library">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M15.41 16.58L10.83 12l4.58-4.59L14 6l-6 6l6 6z"/></svg>
+    </button>
+    <div class="brand"><h1>Classics</h1></div>
+    <div class="top-actions"><span style="width:40px;display:inline-block"></span></div>
+  </header>
+  <div class="classics-intro">
+    <p class="hero-sub">Free public-domain classics, kept on your home library. Tap one to read it on this device — it downloads once, then works offline.</p>
+    <input id="classics-search" type="search" placeholder="Search title or author…" class="classics-search" autocapitalize="none" autocomplete="off">
+    <div id="classics-status" class="hint"></div>
+  </div>
+  <div id="classics-list" class="classics-list"></div>
 </section>
 
 <!-- Reader view -->
@@ -242,7 +263,7 @@
      once the reader feels stable. -->
 <script>
   (function () {
-    const VERSION = 'v36';
+    const VERSION = 'v37';
     const pill = document.createElement('div');
     pill.style.cssText = 'position:fixed;bottom:6px;right:8px;font-size:10px;' +
       'opacity:0.55;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;' +

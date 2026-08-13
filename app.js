@@ -151,6 +151,127 @@
   function firstChars(s) { return (s || 'Book').trim().slice(0, 1).toUpperCase(); }
   function formatKind(f) { return { epub: 'EPUB', pdf: 'PDF', txt: 'Text' }[f] || f; }
 
+  // -------------------- Classics shelf --------------------
+  // A shared library of public-domain classics served off the mini/SSD at
+  // library.aiprofits.cc. The catalog is a small JSON list; tapping a book
+  // downloads its EPUB once into this device's own library (so it opens
+  // instantly and works offline afterwards), then opens it.
+  const LIBRARY_BASE = 'https://library.aiprofits.cc';
+  const classicsView = el('classics');
+  const classicsBtn = el('classics-btn');
+  const classicsBack = el('classics-back');
+  const classicsList = el('classics-list');
+  const classicsSearch = el('classics-search');
+  const classicsStatus = el('classics-status');
+  let classicsCatalog = null;
+
+  function fmtSize(n) {
+    if (!n) return '';
+    const mb = n / (1024 * 1024);
+    return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+  }
+
+  async function openClassics() {
+    libraryView.classList.remove('active');
+    classicsView.classList.add('active');
+    if (!classicsCatalog) await loadCatalog();
+    renderClassics();
+  }
+  function closeClassics() {
+    classicsView.classList.remove('active');
+    libraryView.classList.add('active');
+  }
+
+  async function loadCatalog() {
+    if (classicsStatus) classicsStatus.textContent = 'Loading the library…';
+    try {
+      const res = await fetch(LIBRARY_BASE + '/catalog.json', { cache: 'no-cache' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      classicsCatalog = await res.json();
+      if (classicsStatus) classicsStatus.textContent = '';
+    } catch (e) {
+      classicsCatalog = [];
+      if (classicsStatus) classicsStatus.textContent =
+        'Could not reach the library — check your internet, then pull to retry.';
+    }
+  }
+
+  async function renderClassics() {
+    const q = (classicsSearch && classicsSearch.value || '').toLowerCase().trim();
+    const owned = new Set((await DB.listBooks()).map(b => b.classicId).filter(Boolean));
+    const items = (classicsCatalog || []).filter(b =>
+      !q || (b.title + ' ' + (b.author || '')).toLowerCase().includes(q));
+    classicsList.innerHTML = '';
+    if (!classicsCatalog) return;
+    if (!items.length) {
+      classicsList.innerHTML = '<div class="empty-line">No matches.</div>';
+      return;
+    }
+    for (const b of items) {
+      const row = document.createElement('div');
+      row.className = 'classic-row';
+      const have = owned.has(b.id);
+      const size = fmtSize(b.epubBytes || b.pdfBytes);
+      row.innerHTML = `
+        <div class="classic-cover"><span>${escapeHTML(firstChars(b.title))}</span></div>
+        <div class="classic-meta">
+          <p class="classic-title">${escapeHTML(b.title)}</p>
+          <p class="classic-author">${escapeHTML(b.author || '')}${size ? ` · ${size}` : ''}</p>
+        </div>
+        <button class="classic-get btn-small">${have ? 'Read' : 'Get'}</button>`;
+      const act = () => getClassic(b, row);
+      row.querySelector('.classic-get').addEventListener('click', (e) => { e.stopPropagation(); act(); });
+      row.addEventListener('click', act);
+      classicsList.appendChild(row);
+    }
+  }
+
+  async function getClassic(b, row) {
+    // Already on this device? Just open it.
+    const existing = (await DB.listBooks()).find(x => x.classicId === b.id);
+    if (existing) { closeClassics(); openBook(existing.id); return; }
+
+    const btn = row.querySelector('.classic-get');
+    const rel = b.epub || b.pdf;
+    if (!rel) { showToast('No file available for this book.'); return; }
+    const oldLabel = btn.textContent;
+    btn.textContent = 'Getting…'; btn.disabled = true;
+    try {
+      const res = await fetch(LIBRARY_BASE + rel);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const buf = await res.arrayBuffer();
+      const fmt = b.epub ? 'epub' : 'pdf';
+      let meta = {};
+      if (fmt === 'epub') meta = await extractEpubMeta(buf) || {};
+      else meta = await extractPdfMeta(buf) || {};
+      const id = 'b_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+      const book = {
+        id,
+        classicId: b.id,
+        title: (b.title || meta.title || 'Book').trim(),
+        author: b.author || meta.author || '',
+        format: fmt,
+        size: buf.byteLength,
+        cover: meta.cover || null,
+        data: buf,
+        addedAt: Date.now(),
+        lastOpened: null,
+      };
+      await DB.addBook(book);
+      closeClassics();
+      renderLibrary();
+      openBook(id);
+    } catch (e) {
+      console.error('getClassic failed:', e);
+      showToast('Download failed — ' + (e.message || 'try again'));
+      btn.textContent = oldLabel; btn.disabled = false;
+    }
+  }
+
+  if (classicsBtn) classicsBtn.addEventListener('click', openClassics);
+  if (classicsBack) classicsBack.addEventListener('click', closeClassics);
+  if (classicsSearch) classicsSearch.addEventListener('input', () => renderClassics());
+
   // -------------------- Add / Upload --------------------
   function formatFromFile(file) {
     const name = file.name.toLowerCase();
