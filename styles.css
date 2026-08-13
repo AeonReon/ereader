@@ -896,8 +896,16 @@ input, select { font: inherit; color: inherit; }
 }
 .classics-search:focus { border-color: var(--gold); }
 
+#classics {
+  background:
+    radial-gradient(1400px 900px at 8% -10%, rgba(217, 160, 45, 0.10) 0%, transparent 55%),
+    linear-gradient(180deg, var(--paper-warm) 0%, var(--paper) 100%);
+  overflow: hidden;
+}
 .classics-list {
-  max-width: 760px; margin: 0 auto;
+  flex: 1; min-height: 0;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  width: 100%; max-width: 760px; margin: 0 auto; box-sizing: border-box;
   padding: 10px 20px calc(40px + var(--safe-bot));
   display: flex; flex-direction: column; gap: 8px;
 }
