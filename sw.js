@@ -2,7 +2,7 @@
 // Bump the version string on every code change so old caches get evicted
 // and PWAs (especially on Android e-ink tablets) actually pick up the
 // new app.js / reader.js / tts.js. Without this bump, cache-first wins.
-const CACHE = 'reader-shell-v39';
+const CACHE = 'reader-shell-v40';
 const ASSETS = [
   './',
   './index.html',
@@ -41,6 +41,13 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+  // Classics-library BOOK FILES: never cache in the service worker — the book
+  // is already stored once in the app's own library (IndexedDB) when you open
+  // it. Caching here too would double the storage a book uses on the device.
+  // (The small catalog.json is fine to fall through and cache.)
+  if (url.hostname === 'library.aiprofits.cc' && url.pathname.startsWith('/books/')) {
+    return; // let the browser fetch it directly, no SW cache copy
+  }
   // Same-origin: cache-first
   if (url.origin === self.location.origin) {
     e.respondWith(
