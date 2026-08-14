@@ -940,3 +940,20 @@ input, select { font: inherit; color: inherit; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .classic-get { flex: 0 0 auto; }
+
+/* -------------------- Edge tap zones (tap-to-turn) -------------------- */
+.tap-zone {
+  position: absolute; top: 0; bottom: 0; width: 30%;
+  z-index: 6; background: transparent; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tap-zone.left { left: 0; }
+.tap-zone.right { right: 0; }
+
+/* Category header inside the Classics shelf */
+.classics-cat {
+  font-family: var(--font-sans); font-size: 12px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--gold); margin: 14px 2px 2px;
+}
+.classics-cat:first-child { margin-top: 2px; }

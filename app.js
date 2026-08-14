@@ -207,22 +207,31 @@
       classicsList.innerHTML = '<div class="empty-line">No matches.</div>';
       return;
     }
-    for (const b of items) {
-      const row = document.createElement('div');
-      row.className = 'classic-row';
-      const have = owned.has(b.id);
-      const size = fmtSize(b.epubBytes || b.pdfBytes);
-      row.innerHTML = `
-        <div class="classic-cover"><span>${escapeHTML(firstChars(b.title))}</span></div>
-        <div class="classic-meta">
-          <p class="classic-title">${escapeHTML(b.title)}</p>
-          <p class="classic-author">${escapeHTML(b.author || '')}${size ? ` · ${size}` : ''}</p>
-        </div>
-        <button class="classic-get btn-small">${have ? 'Read' : 'Get'}</button>`;
-      const act = () => getClassic(b, row);
-      row.querySelector('.classic-get').addEventListener('click', (e) => { e.stopPropagation(); act(); });
-      row.addEventListener('click', act);
-      classicsList.appendChild(row);
+    // Group by category (e.g. "Great Books", "Architecture") with a header each.
+    const byCat = {};
+    for (const b of items) (byCat[b.category || 'Books'] = byCat[b.category || 'Books'] || []).push(b);
+    for (const cat of Object.keys(byCat).sort()) {
+      const head = document.createElement('div');
+      head.className = 'classics-cat';
+      head.textContent = `${cat} · ${byCat[cat].length}`;
+      classicsList.appendChild(head);
+      for (const b of byCat[cat]) {
+        const row = document.createElement('div');
+        row.className = 'classic-row';
+        const have = owned.has(b.id);
+        const size = fmtSize(b.epubBytes || b.pdfBytes);
+        row.innerHTML = `
+          <div class="classic-cover"><span>${escapeHTML(firstChars(b.title))}</span></div>
+          <div class="classic-meta">
+            <p class="classic-title">${escapeHTML(b.title)}</p>
+            <p class="classic-author">${escapeHTML(b.author || '')}${size ? ` · ${size}` : ''}</p>
+          </div>
+          <button class="classic-get btn-small">${have ? 'Read' : 'Get'}</button>`;
+        const act = () => getClassic(b, row);
+        row.querySelector('.classic-get').addEventListener('click', (e) => { e.stopPropagation(); act(); });
+        row.addEventListener('click', act);
+        classicsList.appendChild(row);
+      }
     }
   }
 
@@ -531,6 +540,12 @@
   backBtn.addEventListener('click', closeReader);
   prevBtn.addEventListener('click', () => navigatePage('prev'));
   nextBtn.addEventListener('click', () => navigatePage('next'));
+
+  // Edge tap zones — reliable tap-to-turn on every device/format.
+  const tapPrev = el('tap-prev');
+  const tapNext = el('tap-next');
+  if (tapPrev) tapPrev.addEventListener('click', () => navigatePage('prev'));
+  if (tapNext) tapNext.addEventListener('click', () => navigatePage('next'));
   progressEl.addEventListener('change', () => Reader.goto(Number(progressEl.value) / 100));
 
   // Tap-zone + swipe page turning for PDF / TXT.
@@ -544,7 +559,7 @@
     let downX = 0, downY = 0, downT = 0, tracking = false;
 
     const isInteractive = (el) =>
-      el && el.closest && el.closest('button, input, select, textarea, a, [role="button"], .drawer, #scrim');
+      el && el.closest && el.closest('button, input, select, textarea, a, [role="button"], .drawer, #scrim, .tap-zone');
 
     area.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;

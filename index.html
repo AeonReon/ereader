@@ -121,6 +121,12 @@
     <div id="pdf-area" class="reader-area"><canvas id="pdf-canvas"></canvas></div>
     <div id="txt-area" class="reader-area"><div id="txt-body"></div></div>
     <div id="loading" class="loading hidden">Loading…</div>
+    <!-- Transparent edge tap zones (parent doc, above the page) — reliable
+         tap-to-turn on every device/format, independent of epub.js internals.
+         Left third = previous page, right third = next. Middle is left free
+         for text selection and the chrome toggle. -->
+    <div id="tap-prev" class="tap-zone left" aria-hidden="true"></div>
+    <div id="tap-next" class="tap-zone right" aria-hidden="true"></div>
   </div>
 
   <footer class="reader-bar bottom">
@@ -263,7 +269,7 @@
      once the reader feels stable. -->
 <script>
   (function () {
-    const VERSION = 'v38';
+    const VERSION = 'v39';
     const pill = document.createElement('div');
     pill.style.cssText = 'position:fixed;bottom:6px;right:8px;font-size:10px;' +
       'opacity:0.55;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;' +
