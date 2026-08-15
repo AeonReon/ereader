@@ -498,13 +498,61 @@ const Reader = (() => {
     return lines;
   }
 
+  // Build a range CFI that spans from the visible page's start CFI to its end
+  // CFI. epub.js gives us two POINT cfis (currentLocation().start/.end) but no
+  // public helper to join them, so we splice the common path prefix ourselves
+  // and reuse epub.js's own toString()/segmentString() to serialise it.
+  function epubRangeCfi(startCfi, endCfi) {
+    const CFI = new ePub.CFI();
+    const a = CFI.parse(startCfi);
+    const b = CFI.parse(endCfi);
+    const aSteps = (a.path && a.path.steps) || [];
+    const bSteps = (b.path && b.path.steps) || [];
+    const common = { steps: [], terminal: null };
+    let i = 0;
+    const n = Math.min(aSteps.length, bSteps.length);
+    for (; i < n; i++) {
+      if (CFI.equalStep(aSteps[i], bSteps[i])) common.steps.push(aSteps[i]);
+      else break;
+    }
+    CFI.base = a.base;
+    CFI.spinePos = a.spinePos;
+    CFI.range = true;
+    CFI.path = common;
+    CFI.start = { steps: aSteps.slice(i), terminal: (a.path && a.path.terminal) || null };
+    CFI.end = { steps: bSteps.slice(i), terminal: (b.path && b.path.terminal) || null };
+    return CFI.toString();
+  }
+
+  // Text of ONLY the page currently on screen — not the whole chapter. epub.js
+  // paginates a chapter into columns; body.innerText is the entire chapter, so
+  // reading from it made the voice start at the top of the chapter while a
+  // later page was on screen. We instead extract the text inside the visible
+  // CFI range. Falls back to whole-section innerText if the range read fails.
+  async function getEpubVisibleText() {
+    const rendition = state.epub.rendition;
+    const book = state.epub.book;
+    const contents = rendition && rendition.getContents();
+    const doc = contents && contents.length ? contents[0].document : null;
+    try {
+      const loc = rendition.currentLocation();
+      if (book && loc && loc.start && loc.end && loc.start.cfi && loc.end.cfi) {
+        const rangeCfi = epubRangeCfi(loc.start.cfi, loc.end.cfi);
+        const range = await book.getRange(rangeCfi);
+        const text = range && range.toString ? range.toString().trim() : '';
+        if (text) return text;
+      }
+    } catch (e) {
+      console.warn('[Reader] visible-range text failed, using whole section:', e && e.message);
+    }
+    if (!doc) return '';
+    return (doc.body.innerText || doc.body.textContent || '').trim();
+  }
+
   async function getCurrentLines() {
     if (state.kind === 'epub' && state.epub.rendition) {
-      const contents = state.epub.rendition.getContents();
-      if (!contents || !contents.length) return [];
-      const doc = contents[0].document;
-      if (!doc) return [];
-      const raw = doc.body.innerText || doc.body.textContent || '';
+      const raw = await getEpubVisibleText();
+      if (!raw) return [];
       return raw.split(/\r?\n+/).map(l => l.trim()).filter(Boolean);
     }
     if (state.kind === 'pdf' && state.pdf.doc) {
