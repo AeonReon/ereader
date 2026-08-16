@@ -1291,7 +1291,10 @@
         await new Promise(r => setTimeout(r, 700));
         if (!app.ttsActive) return;
         const beforePos = JSON.stringify(Reader.currentPosition());
-        Reader.next();
+        // For EPUB this jumps a whole chapter (we just read the rest of the
+        // current one in a single continuous stream); for PDF/text it turns a
+        // page. Awaited because the EPUB section jump renders async.
+        await Reader.advanceReadAloud();
         // Give the reader a moment to render the new page before grabbing text.
         await new Promise(r => setTimeout(r, 400));
         if (!app.ttsActive) return;  // user may have stopped during the gap

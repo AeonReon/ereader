@@ -498,60 +498,70 @@ const Reader = (() => {
     return lines;
   }
 
-  // Build a range CFI that spans from the visible page's start CFI to its end
-  // CFI. epub.js gives us two POINT cfis (currentLocation().start/.end) but no
-  // public helper to join them, so we splice the common path prefix ourselves
-  // and reuse epub.js's own toString()/segmentString() to serialise it.
-  function epubRangeCfi(startCfi, endCfi) {
-    const CFI = new ePub.CFI();
-    const a = CFI.parse(startCfi);
-    const b = CFI.parse(endCfi);
-    const aSteps = (a.path && a.path.steps) || [];
-    const bSteps = (b.path && b.path.steps) || [];
-    const common = { steps: [], terminal: null };
-    let i = 0;
-    const n = Math.min(aSteps.length, bSteps.length);
-    for (; i < n; i++) {
-      if (CFI.equalStep(aSteps[i], bSteps[i])) common.steps.push(aSteps[i]);
-      else break;
-    }
-    CFI.base = a.base;
-    CFI.spinePos = a.spinePos;
-    CFI.range = true;
-    CFI.path = common;
-    CFI.start = { steps: aSteps.slice(i), terminal: (a.path && a.path.terminal) || null };
-    CFI.end = { steps: bSteps.slice(i), terminal: (b.path && b.path.terminal) || null };
-    return CFI.toString();
-  }
-
-  // Text of ONLY the page currently on screen — not the whole chapter. epub.js
-  // paginates a chapter into columns; body.innerText is the entire chapter, so
-  // reading from it made the voice start at the top of the chapter while a
-  // later page was on screen. We instead extract the text inside the visible
-  // CFI range. Falls back to whole-section innerText if the range read fails.
-  async function getEpubVisibleText() {
+  // Read-aloud text for the current chapter, starting at the page on screen.
+  //
+  // Two earlier attempts both had a downside:
+  //   - whole chapter innerText → continuous, but started at the chapter TOP
+  //     even when a later page was on screen ("reads content I can't see").
+  //   - visible-page-only CFI range → correct spot, but every page turn (one
+  //     paragraph on the e-ink screen) added a fetch+turn gap ("reads a
+  //     paragraph, pauses, reads a paragraph").
+  //
+  // This reads from the visible position through to the END of the chapter in
+  // one continuous stream: correct starting point AND no per-paragraph gaps.
+  // The read-aloud loop then jumps a whole section at a time (see nextSection).
+  // If resolving the visible start fails for any reason, we fall back to the
+  // whole-section text — still continuous, just from the chapter top.
+  async function getEpubReadAloudText() {
     const rendition = state.epub.rendition;
-    const book = state.epub.book;
     const contents = rendition && rendition.getContents();
-    const doc = contents && contents.length ? contents[0].document : null;
+    const cont = contents && contents.length ? contents[0] : null;
+    const doc = cont ? cont.document : null;
     try {
       const loc = rendition.currentLocation();
-      if (book && loc && loc.start && loc.end && loc.start.cfi && loc.end.cfi) {
-        const rangeCfi = epubRangeCfi(loc.start.cfi, loc.end.cfi);
-        const range = await book.getRange(rangeCfi);
-        const text = range && range.toString ? range.toString().trim() : '';
-        if (text) return text;
+      const startCfi = loc && loc.start && loc.start.cfi;
+      // Resolve the visible-start CFI to a node in the RENDERED iframe document
+      // (Contents.range uses this.document), then extend the range to the end
+      // of the body so we capture from here to the chapter's end.
+      if (cont && doc && startCfi && typeof cont.range === 'function') {
+        const r0 = cont.range(startCfi);
+        if (r0 && r0.startContainer) {
+          const full = doc.createRange();
+          full.setStart(r0.startContainer, r0.startOffset);
+          full.setEnd(doc.body, doc.body.childNodes.length);
+          const text = full.toString().trim();
+          if (text) return text;
+        }
       }
     } catch (e) {
-      console.warn('[Reader] visible-range text failed, using whole section:', e && e.message);
+      console.warn('[Reader] read-aloud range failed, using whole section:', e && e.message);
     }
     if (!doc) return '';
     return (doc.body.innerText || doc.body.textContent || '').trim();
   }
 
+  // Jump the view to the start of the NEXT spine section (next chapter). Used
+  // by the read-aloud loop, which reads a whole chapter per play() call — so
+  // after a chapter finishes we advance a section, not a single page (a page
+  // advance would land mid-chapter and re-read text we just spoke). Leaves the
+  // view unchanged when there is no next section, so the caller's position-
+  // didn't-change check treats that as end-of-book.
+  async function nextSection() {
+    if (state.kind !== 'epub' || !state.epub.rendition) return next();
+    const book = state.epub.book;
+    const loc = state.epub.rendition.currentLocation();
+    const idx = loc && loc.start ? loc.start.index : undefined;
+    if (typeof idx !== 'number' || !book || !book.spine) return next();
+    const sec = book.spine.get(idx + 1);
+    if (sec && (sec.href || sec.index != null)) {
+      try { await state.epub.rendition.display(sec.href || sec.index); }
+      catch (_) { /* no next section / display failed — leave view put */ }
+    }
+  }
+
   async function getCurrentLines() {
     if (state.kind === 'epub' && state.epub.rendition) {
-      const raw = await getEpubVisibleText();
+      const raw = await getEpubReadAloudText();
       if (!raw) return [];
       return raw.split(/\r?\n+/).map(l => l.trim()).filter(Boolean);
     }
@@ -624,8 +634,15 @@ const Reader = (() => {
 
   window.addEventListener('resize', onResize);
 
+  // Advance for the read-aloud loop: whole section for EPUB (continuous
+  // chapter reads), single page for PDF/text (a page IS the unit there).
+  async function advanceReadAloud() {
+    if (state.kind === 'epub') return nextSection();
+    return next();
+  }
+
   return {
-    load, next, prev, goto, toc, gotoTocItem,
+    load, next, prev, goto, toc, gotoTocItem, advanceReadAloud,
     currentPosition, getCurrentText, getCurrentLines, getCurrentLinesMeta,
     setTheme, setFontScale, setFontFamily, setSpacing,
     destroy,
