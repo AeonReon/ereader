@@ -164,6 +164,7 @@
   const classicsSearch = el('classics-search');
   const classicsStatus = el('classics-status');
   let classicsCatalog = null;
+  const expandedCats = new Set();   // which category accordions are open
 
   function fmtSize(n) {
     if (!n) return '';
@@ -207,32 +208,62 @@
       classicsList.innerHTML = '<div class="empty-line">No matches.</div>';
       return;
     }
-    // Group by category (e.g. "Great Books", "Architecture") with a header each.
+    // Group into collapsible category sections. Collapsed by default so the
+    // main categories are visible at a glance; tap a header to open it. When
+    // searching, every matching category is auto-expanded so results show.
     const byCat = {};
     for (const b of items) (byCat[b.category || 'Books'] = byCat[b.category || 'Books'] || []).push(b);
+    const searching = !!q;
+
     for (const cat of Object.keys(byCat).sort()) {
-      const head = document.createElement('div');
-      head.className = 'classics-cat';
-      head.textContent = `${cat} · ${byCat[cat].length}`;
-      classicsList.appendChild(head);
-      for (const b of byCat[cat]) {
-        const row = document.createElement('div');
-        row.className = 'classic-row';
-        const have = owned.has(b.id);
-        const size = fmtSize(b.epubBytes || b.pdfBytes);
-        row.innerHTML = `
-          <div class="classic-cover"><span>${escapeHTML(firstChars(b.title))}</span></div>
-          <div class="classic-meta">
-            <p class="classic-title">${escapeHTML(b.title)}</p>
-            <p class="classic-author">${escapeHTML(b.author || '')}${size ? ` · ${size}` : ''}</p>
-          </div>
-          <button class="classic-get btn-small">${have ? 'Read' : 'Get'}</button>`;
-        const act = () => getClassic(b, row);
-        row.querySelector('.classic-get').addEventListener('click', (e) => { e.stopPropagation(); act(); });
-        row.addEventListener('click', act);
-        classicsList.appendChild(row);
-      }
+      const open = searching || expandedCats.has(cat);
+      const section = document.createElement('div');
+      section.className = 'classics-section' + (open ? ' open' : '');
+
+      const head = document.createElement('button');
+      head.className = 'classics-cat-head';
+      head.innerHTML = `
+        <svg class="chev" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8.59 16.58L13.17 12L8.59 7.41L10 6l6 6l-6 6z"/></svg>
+        <span class="cat-name">${escapeHTML(cat)}</span>
+        <span class="cat-count">${byCat[cat].length}</span>`;
+
+      const body = document.createElement('div');
+      body.className = 'classics-cat-body';
+      const fill = () => {
+        body.innerHTML = '';
+        for (const b of byCat[cat]) body.appendChild(makeClassicRow(b, owned));
+      };
+      if (open) fill();   // lazy: only build rows for open sections
+
+      head.addEventListener('click', () => {
+        const nowOpen = !section.classList.contains('open');
+        section.classList.toggle('open', nowOpen);
+        if (nowOpen) { expandedCats.add(cat); if (!body.childElementCount) fill(); }
+        else { expandedCats.delete(cat); }
+      });
+
+      section.appendChild(head);
+      section.appendChild(body);
+      classicsList.appendChild(section);
     }
+  }
+
+  function makeClassicRow(b, owned) {
+    const row = document.createElement('div');
+    row.className = 'classic-row';
+    const have = owned.has(b.id);
+    const size = fmtSize(b.epubBytes || b.pdfBytes);
+    row.innerHTML = `
+      <div class="classic-cover"><span>${escapeHTML(firstChars(b.title))}</span></div>
+      <div class="classic-meta">
+        <p class="classic-title">${escapeHTML(b.title)}</p>
+        <p class="classic-author">${escapeHTML(b.author || '')}${size ? ` · ${size}` : ''}</p>
+      </div>
+      <button class="classic-get btn-small">${have ? 'Read' : 'Get'}</button>`;
+    const act = () => getClassic(b, row);
+    row.querySelector('.classic-get').addEventListener('click', (e) => { e.stopPropagation(); act(); });
+    row.addEventListener('click', act);
+    return row;
   }
 
   async function getClassic(b, row) {

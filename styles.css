@@ -957,3 +957,38 @@ input, select { font: inherit; color: inherit; }
   color: var(--gold); margin: 14px 2px 2px;
 }
 .classics-cat:first-child { margin-top: 2px; }
+
+/* -------------------- Classics category accordion -------------------- */
+.classics-section {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper-warm);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.classics-cat-head {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 14px 14px;
+  background: transparent; border: none; cursor: pointer;
+  font-family: var(--font-sans); font-size: 15px; font-weight: 700;
+  color: var(--ink); text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+.classics-cat-head .chev {
+  flex: 0 0 auto; color: var(--gold);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.classics-section.open .classics-cat-head .chev { transform: rotate(90deg); }
+.classics-cat-head .cat-name { flex: 1 1 auto; }
+.classics-cat-head .cat-count {
+  flex: 0 0 auto;
+  font-size: 12px; font-weight: 700; color: var(--gold-ink);
+  background: var(--gold-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px; padding: 2px 10px;
+}
+.classics-cat-body { display: none; padding: 0 8px 8px; }
+.classics-section.open .classics-cat-body { display: block; }
+/* Rows sit flush inside a section — lighten their border so the section frames them */
+.classics-cat-body .classic-row { background: var(--paper); }
